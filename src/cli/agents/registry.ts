@@ -363,14 +363,92 @@ async function commandOnPath(name: string): Promise<boolean> {
 }
 
 async function readJsonConfig(path: string): Promise<Record<string, unknown>> {
+  let raw: string
   try {
-    const raw = await readFile(path, "utf8")
-    if (!raw.trim()) return {}
-    return JSON.parse(raw)
+    raw = await readFile(path, "utf8")
   } catch (e: any) {
     if (e.code === "ENOENT") return {}
     throw new Error(`could not read ${path}: ${e.message}`)
   }
+  if (!raw.trim()) return {}
+  try {
+    return JSON.parse(raw)
+  } catch (strictErr) {
+    // Some agents (Zed, VS Code, JetBrains) ship JSONC: line/block
+    // comments and trailing commas. Tolerate that on read so we don't
+    // blow up on a hand-edited settings file. We re-emit canonical JSON
+    // on write, which strips comments — the user is warned about that
+    // by the `notes` field on those agents' definitions.
+    try {
+      return JSON.parse(stripJsonc(raw))
+    } catch {
+      throw new Error(
+        `could not parse ${path}: ${(strictErr as Error).message}. ` +
+          `If this file uses comments or trailing commas, fix the syntax error first.`,
+      )
+    }
+  }
+}
+
+/**
+ * Remove `//` line comments, `/* … *\/` block comments, and trailing
+ * commas before `]` / `}`. String contents are preserved verbatim — we
+ * walk character-by-character with a string-state flag so a `//` inside
+ * a JSON string survives.
+ */
+function stripJsonc(input: string): string {
+  let out = ""
+  let i = 0
+  const n = input.length
+  let inString = false
+  let stringQuote = '"'
+  while (i < n) {
+    const c = input[i]
+    if (inString) {
+      out += c
+      if (c === "\\" && i + 1 < n) {
+        out += input[i + 1]
+        i += 2
+        continue
+      }
+      if (c === stringQuote) inString = false
+      i++
+      continue
+    }
+    if (c === '"' || c === "'") {
+      inString = true
+      stringQuote = c
+      out += c
+      i++
+      continue
+    }
+    if (c === "/" && i + 1 < n && input[i + 1] === "/") {
+      // Line comment — skip to newline.
+      i += 2
+      while (i < n && input[i] !== "\n") i++
+      continue
+    }
+    if (c === "/" && i + 1 < n && input[i + 1] === "*") {
+      // Block comment — skip to */.
+      i += 2
+      while (i + 1 < n && !(input[i] === "*" && input[i + 1] === "/")) i++
+      i += 2
+      continue
+    }
+    if (c === ",") {
+      // Trailing comma — lookahead past whitespace for ] or }.
+      let j = i + 1
+      while (j < n && /\s/.test(input[j])) j++
+      if (j < n && (input[j] === "]" || input[j] === "}")) {
+        // Drop the comma.
+        i++
+        continue
+      }
+    }
+    out += c
+    i++
+  }
+  return out
 }
 
 async function writeJsonConfig(path: string, data: Record<string, unknown>): Promise<void> {

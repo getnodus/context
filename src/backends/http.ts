@@ -144,10 +144,11 @@ export class HttpBackend implements ContextBackend {
     return (await this.#json(res)) as ContextEntry
   }
 
-  async revert(id: string, snapshotName?: string): Promise<ContextEntry> {
+  async revert(id: string, snapshotName?: string, author?: string): Promise<ContextEntry> {
     if (!this.#history) throw new NotSupportedError("history", "http")
     const res = await this.#req("POST", `/entries/${encodeId(id)}/revert`, {
       snapshot: snapshotName,
+      ...(author ? { author } : {}),
     })
     if (res.status === 404) throw new Error(`no history for ${id}`)
     return (await this.#json(res)) as ContextEntry

@@ -156,7 +156,7 @@ Response: `ContextEntry` representing the snapshot.
 
 ### `POST /entries/:id/revert`
 
-Body: `{ "snapshot": "..." }` — if omitted, revert to most recent.
+Body: `{ "snapshot": "...", "author": "..." }` — `snapshot` selects which prior version to restore (most recent if omitted); `author` is recorded on the resulting entry, same semantics as `PUT`.
 
 Response: `ContextEntry` representing the restored state.
 

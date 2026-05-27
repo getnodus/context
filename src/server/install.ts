@@ -185,6 +185,16 @@ async function writeSystemdUnit(opts: {
   unitDir: string
 }): Promise<string> {
   const user = process.env.USER ?? process.env.LOGNAME ?? "root"
+
+  // Tokens go in a separate, mode-600 EnvironmentFile instead of the
+  // service file. The .service file ends up world-readable under
+  // /etc/systemd/system; an inline `Environment=…` directive would leak
+  // the token to every local user.
+  const envFilePath = `/etc/${SERVICE_NAME}.env`
+  if (opts.token) {
+    await sudoWrite(envFilePath, `NODUS_CONTEXT_TOKEN=${opts.token}\n`, { mode: 0o600 })
+  }
+
   const unit = [
     "[Unit]",
     "Description=Nodus Context HTTP Server",
@@ -194,7 +204,7 @@ async function writeSystemdUnit(opts: {
     "[Service]",
     "Type=simple",
     `User=${user}`,
-    ...(opts.token ? [`Environment=NODUS_CONTEXT_TOKEN=${opts.token}`] : []),
+    ...(opts.token ? [`EnvironmentFile=${envFilePath}`] : []),
     `ExecStart=/usr/bin/env nodus-context-server --host ${opts.host} --port ${opts.port} --root ${opts.rootDir}`,
     "Restart=on-failure",
     "RestartSec=5",
@@ -290,10 +300,15 @@ async function ensureDir(p: string): Promise<void> {
   }
 }
 
-async function sudoWrite(path: string, contents: string): Promise<void> {
+async function sudoWrite(
+  path: string,
+  contents: string,
+  opts: { mode?: number } = {},
+): Promise<void> {
   // Try a plain write first — works when the user already owns the path.
   try {
     await writeFile(path, contents, "utf8")
+    if (opts.mode !== undefined) await chmod(path, opts.mode)
     return
   } catch (e: any) {
     if (e?.code !== "EACCES" && e?.code !== "EPERM") throw e
@@ -307,6 +322,10 @@ async function sudoWrite(path: string, contents: string): Promise<void> {
     proc.stdin.write(contents)
     proc.stdin.end()
   })
+  if (opts.mode !== undefined) {
+    // chmod via sudo so it works on root-owned paths too.
+    await runOrFail("sudo", ["chmod", opts.mode.toString(8), path])
+  }
 }
 
 async function runOrFail(cmd: string, args: string[]): Promise<void> {

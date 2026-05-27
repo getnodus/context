@@ -141,6 +141,37 @@ test("Zed-style keyPath ('context_servers') is honoured", async () => {
   })
 })
 
+test("readMcp tolerates JSONC (comments + trailing commas)", async () => {
+  await withConfigDir(async (configDir) => {
+    const mcpFile = join(configDir, "jsonc-settings.json")
+    // Hand-written JSONC: line comment, block comment, trailing comma.
+    const jsonc = `{
+  // user settings
+  "context_servers": {
+    "nodus-context": {
+      "command": "npx",
+      "args": ["-y", "--package", "@getnodus/context", "nodus-context-mcp"],
+    },
+  },
+  /* block
+     comment */
+  "theme": "dark",
+}
+`
+    await writeFile(mcpFile, jsonc, "utf8")
+    const def: AgentDefinition = {
+      id: "jsonc-agent",
+      name: "JSONC Agent",
+      configPathHint: mcpFile,
+      detect: { type: "always" },
+      install: { type: "json-merge", path: mcpFile, keyPath: ["context_servers"] },
+    }
+    const resolved = mkResolved(def)
+    const read = await readMcp(resolved)
+    assert.equal(read?.command, "npx", "should read entry from JSONC-formatted file")
+  })
+})
+
 test("detect path-exists works against a real tmp file", async () => {
   await withConfigDir(async (configDir) => {
     const marker = join(configDir, "marker")
