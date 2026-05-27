@@ -1,0 +1,35 @@
+{
+  "name": "@nodus/context",
+  "version": "0.0.5",
+  "description": "Personal context layer for AI agents. Your memory, portable across every agent you use.",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "nodus-context": "./dist/cli/index.js",
+    "nodus-context-mcp": "./dist/mcp/server.js"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "typecheck": "tsc --noEmit",
+    "test": "pnpm build && node --import tsx --test test/*.test.ts",
+    "start:mcp": "node dist/mcp/server.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.4",
+    "gray-matter": "^4.0.3",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
