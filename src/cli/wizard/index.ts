@@ -13,7 +13,7 @@ import {
 } from "../integrations.js"
 import { loadConfig, saveConfig } from "../../config/index.js"
 import { type Profile } from "../../backends/index.js"
-import { bold, cyan, dim, green, info, red, yellow } from "../output.js"
+import { bold, cyan, dim, green, info, printRestartHint, red, yellow } from "../output.js"
 import { packageVersion } from "../version.js"
 
 export interface WizardOptions {
@@ -133,7 +133,7 @@ export async function runWizard(_opts: WizardOptions = {}): Promise<void> {
   await applyAgents(chosen)
 
   info(green("\n✓ done."))
-  info(dim("Restart your agent(s) so they pick up the new MCP server."))
+  printRestartHint()
 }
 
 function banner(): void {

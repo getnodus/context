@@ -6,7 +6,7 @@ import {
   type AgentTarget,
 } from "../integrations.js"
 import { type Profile } from "../../backends/index.js"
-import { bold, cyan, dim, fail, green, info, red, yellow } from "../output.js"
+import { bold, cyan, dim, fail, green, info, printRestartHint, red, yellow } from "../output.js"
 import { decodePairing, isPairingString } from "../../server/pairing.js"
 
 export interface SetupArgs {
@@ -159,7 +159,11 @@ export async function cmdSetup(args: SetupArgs): Promise<void> {
     agents: { installed, failed, skipped },
     notes: [
       ...notes,
-      ...(installed.length > 0 ? ["restart each installed agent to load the new MCP server"] : []),
+      ...(installed.length > 0
+        ? [
+            "restart each installed agent to load the new MCP server: quit and relaunch GUI apps (Claude Desktop, Cursor, Cline, Windsurf, Zed); start a new session for CLI agents (Claude Code, Codex CLI)",
+          ]
+        : []),
     ],
   }
 
@@ -181,7 +185,8 @@ export async function cmdSetup(args: SetupArgs): Promise<void> {
   for (const f of failed) {
     info(`  ${red("failed".padEnd(18))} ${f.id}: ${f.error}`)
   }
-  for (const n of result.notes) info(yellow(`  · ${n}`))
+  for (const n of notes) info(yellow(`  · ${n}`))
+  if (installed.length > 0) printRestartHint()
   if (!result.ok) process.exit(1)
 }
 

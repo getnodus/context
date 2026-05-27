@@ -9,13 +9,23 @@ The storage is pluggable. By default it's markdown files on your disk; you can a
 ## Quick start
 
 ```sh
-npx -p @getnodus/context nodus-context init        # register with Claude Desktop, Claude Code, Cursor
-npx -p @getnodus/context nodus-context doctor      # show backend + integration status
+npm i -g @getnodus/context           # adds nodus-context to your $PATH
+nodus-context init                   # interactive wizard: pick backend, install for detected agents
+nodus-context doctor                 # show backend + integration status
 ```
 
-After install you can also just call `nodus-context` directly (it's added to your `$PATH` by `npm i -g @getnodus/context` or via `pnpm`/`bun` global installs).
+`init` is interactive (it asks where context should live and which agents to install for). If you want a non-interactive form — or you're an AI assistant doing this for someone — use `setup` instead and see [AGENTS.md](./AGENTS.md):
 
-Restart your agent. It now has tools to read and write your context.
+```sh
+nodus-context setup --backend=local --agents=detected --json
+```
+
+Prefer not to install globally? `npx -p @getnodus/context nodus-context init` works too. The `-p` flag is required because the binary name (`nodus-context`) differs from the package name (`@getnodus/context`).
+
+After install, restart each agent so it loads the new MCP server:
+
+- **Claude Desktop / Cursor / Cline / Windsurf / Zed** — quit and relaunch the app.
+- **Claude Code / Codex CLI** — exit the current session and start a new one.
 
 ## CLI
 

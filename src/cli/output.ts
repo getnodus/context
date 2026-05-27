@@ -25,6 +25,19 @@ export function info(msg: string): void {
   process.stderr.write(msg + "\n")
 }
 
+/**
+ * Standardized restart hint shown after install / repair / join. Spelling
+ * out what "restart" means per agent class is more useful than the
+ * one-liner — humans guess wrong (whole-OS reboot) and AIs paraphrase
+ * inconsistently.
+ */
+export function printRestartHint(): void {
+  info("")
+  info(dim("Restart each agent to load the new MCP server:"))
+  info(dim("  • Claude Desktop / Cursor / Cline / Windsurf / Zed — quit and relaunch the app"))
+  info(dim("  • Claude Code / Codex CLI — exit the current session and start a new one"))
+}
+
 export function renderList(entries: ContextEntrySummary[]): string {
   if (entries.length === 0) {
     return dim("no entries")

@@ -39,8 +39,10 @@ ${bold("Usage:")}
 ${bold("Setup:")}
   init                             Interactive setup wizard
                                    (asks where context lives + which agents to install)
-  setup --backend=local|server|mirror [--url=<u>] [--token=<t>] [--agents=detected|all|<a,b>] [--json]
-                                   Non-interactive AI-friendly setup (single deterministic command)
+  setup --backend=local|server|mirror [--url=<u>] [--token=<t>]
+        [--agents=detected|all|none|<a,b>] [--profile=<name>] [--json]
+                                   Non-interactive AI-friendly setup (single deterministic command).
+                                   With --json, exits non-zero on partial agent-install failure.
   join <pairing-string>            One-shot: paste nodus://… string, configure profile + install MCPs
   uninstall [--yes] [--dry-run] [--only=<id>]
                                    Remove the MCP server from detected agents
@@ -94,7 +96,8 @@ ${bold("Portability:")}
 ${bold("Other:")}
   path [<id>]                      Print disk path of root or an entry
   mcp                              Run the MCP server on stdio (used by agents)
-  help [command]                   Show help
+  help                             Show this help
+  version                          Print the installed version
 
 ${dim("Storage: ~/.nodus/context/  (override with NODUS_CONTEXT_DIR)")}
 ${dim("Config:  ~/.nodus/config.json (override with NODUS_CONFIG_DIR)")}

@@ -1,6 +1,6 @@
 import { decodePairing } from "../../server/pairing.js"
 import { loadConfig, saveConfig } from "../../config/index.js"
-import { bold, cyan, dim, fail, green, info, red, yellow } from "../output.js"
+import { bold, cyan, dim, fail, green, info, printRestartHint, red, yellow } from "../output.js"
 import { detectTargets, installMcp, mcpCommand } from "../integrations.js"
 
 export interface JoinArgs {
@@ -88,7 +88,7 @@ export async function cmdJoin(args: JoinArgs): Promise<void> {
   if (!reachable) {
     info(yellow("server didn't respond. profile saved; verify URL and try again."))
   } else if (result.installed.length > 0) {
-    info(dim("Restart your agent(s) to pick up the MCP server."))
+    printRestartHint()
   }
 }
 

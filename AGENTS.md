@@ -25,7 +25,9 @@ A personal-context layer for MCP-speaking AI agents. It exposes `read_context` /
    nodus-context doctor --json
    ```
 
-   Parse the JSON. `capabilities.version` tells you what features exist. `doctor.profile`, `doctor.backend`, `doctor.agents`, `doctor.issues` tell you what's already configured and what's broken. If a `setup` command isn't listed in `capabilities.commands`, the user is on a version older than `0.0.12` — tell them to upgrade.
+   Parse the JSON. `capabilities.version` tells you what features exist — if it's less than `0.0.12`, tell the user to upgrade. `doctor.profile`, `doctor.backend`, `doctor.agents`, `doctor.issues` tell you what's already configured and what's broken.
+
+   **If the user is already configured** (`doctor.profile.active` is set and `doctor.backend` has a type), don't blindly re-run `setup`. Ask whether they want to keep the existing backend, switch to a different one, or just install MCP for additional agents. The `setup` command overwrites the named profile and re-points `activeProfile`, so re-running unnecessarily can disrupt a working setup.
 
 3. **Ask the user where their context should live.** Pick one based on their answer:
 
@@ -56,22 +58,40 @@ A personal-context layer for MCP-speaking AI agents. It exposes `read_context` /
        "failed":    [{ "id": "cursor",      "error": "…" }],
        "skipped":   [{ "id": "zed",         "reason": "not installed on this machine" }]
      },
-     "notes": ["restart each installed agent to load the new MCP server"]
+     "notes": ["restart each installed agent to load the new MCP server: …"]
    }
    ```
 
-5. **Report to the user** in plain language. Summarize: backend chosen, agents installed, anything that failed, and the restart instruction. Don't dump the raw JSON unless they ask for it.
+   **Exit code**: `setup --json` exits non-zero when `ok: false` (any agent install failed). The JSON still prints to stdout — read both. Treat exit-0 + `ok: true` as success; anything else means investigate `agents.failed[]`.
+
+5. **Verify reachability** for server/mirror backends, since the profile is written even if the backend is unreachable:
+
+   ```sh
+   nodus-context list --limit=1 --json
+   ```
+
+   A clean exit with a JSON array confirms the client can talk to the backend. An error here means the profile is configured but unusable — surface that to the user.
+
+6. **Report to the user** in plain language. Summarize: backend chosen, agents installed, anything that failed, and the restart instruction (see "Restart specifics" below). Don't dump the raw JSON unless they ask for it.
+
+   **Restart specifics** — be concrete, not "restart your agents":
+   - **Claude Desktop, Cursor, Cline, Windsurf, Zed**: quit and relaunch the application.
+   - **Claude Code, Codex CLI**: exit the current session (`/exit` or Ctrl-D) and start a new one. The currently-running session won't pick up the new MCP server.
+
+   Never tell the user to reboot their computer.
 
 ## Flag reference (everything you might pass)
 
 ```
 nodus-context setup
-  --backend=local|server|mirror   where context lives (required)
-  --url=<u>                       server URL or nodus:// pairing string (server/mirror)
-  --token=<t>                     bearer token (omit if pairing string carries one)
+  --backend=local|server|mirror   where context lives (defaults to local if omitted)
+  --url=<u>                       server URL or nodus://… pairing string (required for server/mirror)
+  --token=<t>                     bearer token (omit if pairing string carries one;
+                                  if both are present, --token wins)
   --agents=detected|all|none|<a,b,…>
                                   which agents to install for (default: detected)
-  --profile=<name>                profile name to write (default: derived from backend)
+  --profile=<name>                profile name to write (default: derived from backend —
+                                  local→"default", server→"server", mirror→"cloud")
   --json                          machine-readable output (always pass this)
 ```
 
@@ -89,8 +109,8 @@ When `doctor --json` returns `issues[]`, map each issue to a fix you can offer t
 
 - Don't run the interactive wizard (`nodus-context init` with no flags) — it requires a TTY you don't have. Use `setup` instead.
 - Don't write or modify `~/.nodus/config.json` directly. Use `setup` / `profile add` / `use` so atomicity and validation are preserved.
-- Don't store the user's bearer token in any conversation log, memory entry, commit, or shared context. If you have to reference it, only refer to its location (`~/.nodus/server-token.txt`) — never the value.
-- Don't ask the user to restart their entire computer. Only the MCP-hosting agents (Claude Desktop, Claude Code session, Codex CLI session) need to restart, and only once after install.
+- **Don't store or log the user's bearer token.** This includes the token itself AND any pairing string (`nodus://TOKEN@HOST:PORT`) that carries one — the token is embedded inside it. Don't paste either into commit messages, memory entries, PR descriptions, chat transcripts, or shared context. If you have to reference the token, refer only to its location (`~/.nodus/server-token.txt`).
+- Don't ask the user to reboot their computer. Only the MCP-hosting agents need to restart (see "Restart specifics" above), once, after install.
 
 ## Things you can offer that humans often don't know about
 
@@ -101,7 +121,16 @@ When `doctor --json` returns `issues[]`, map each issue to a fix you can offer t
 ## Sanity-check your work after setup
 
 ```sh
-nodus-context doctor --json | jq '.backend, .agents[] | select(.installed)'
+nodus-context doctor --json \
+  | jq '{backend, installed: [.agents[] | select(.installed) | .id], issues}'
 ```
 
-You should see the backend the user picked, plus an `installed: true` entry for every agent in `agents.installed[]` from your `setup` result.
+You should see the backend the user picked, an `installed[]` list containing every agent in `agents.installed[]` from your `setup` result, and an empty `issues[]`.
+
+A clean `list` round-trips through the backend, which `doctor` alone doesn't fully exercise:
+
+```sh
+nodus-context list --limit=1 --json
+```
+
+This is the single most reliable post-setup health check for server / mirror backends.
