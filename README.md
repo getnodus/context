@@ -22,17 +22,33 @@ Restart your agent. It now has tools to read and write your context.
 ```
 nodus-context <command>
 
-  init [--local] [--dry-run]      Register MCP server with detected agents
-  doctor                          Show config, backend, integration status
+Setup:
+  init                            Interactive setup wizard
+  setup --backend=local|server|mirror [--url=<u>] [--token=<t>] [--agents=...]
+                                  Non-interactive, AI-friendly setup (see AGENTS.md)
+  join <pairing-string>           Paste a nodus://… string from `nodus-context-server install`
+                                  to configure profile + install MCPs in one shot
+  uninstall [--yes] [--only=<id>] Remove the MCP server from detected agents
+  doctor [--json]                 Show config, backend, integration status
+  capabilities [--json]           Print supported features (for AI orientation)
 
+Profiles:
   use <name>                      Switch active profile
   profile list                    List profiles
-  profile add <name> --type=...   Add a profile (local | http | module)
+  profile add <name> --type=local|http|module|mirror [--url=...] [--token=...] [--use]
+                                  Add a profile
   profile rm <name>               Remove a profile
   config show                     Print the full config
   config path                     Print path to config file
 
-  list [--prefix=X] [--tag=T] [--type=T]
+Agents:
+  agents list [--json]            List built-in + custom agents and detection status
+  agents add <id> --json-path=<file> [...]
+                                  Register a custom MCP-speaking agent
+  agents rm <id>                  Remove a custom agent
+
+Entries:
+  list [--prefix=X] [--tag=T] [--type=T] [--author=A]
                                   List entries
   show <id>                       Print one entry
   add <id> [--type=T] [--tag=T] [--supersedes=ID] [--expires=ISO]
@@ -43,15 +59,23 @@ nodus-context <command>
   tags                            List all tags in use
   stale [--days=90]               Find stale and expired entries
 
+History:
   history <id>                    List prior versions
   revert <id> [--at=<file>]       Restore a prior version
+  snapshot <id> --at=<file>       Print a snapshot body
 
+Portability:
   export [--out=<file>]           Export to a JSON bundle
   import <file> [--overwrite]     Restore from a bundle
+  sync push|pull <other-profile> [--overwrite] [--dry-run]
+                                  Copy entries between two profiles
 
+Other:
   path [<id>]                     Print disk path
-  mcp                             Run MCP server on stdio
+  mcp                             Run MCP server on stdio (used by agents)
 ```
+
+For multi-device setup, run `nodus-context-server install` on a box you own; it emits a pairing string for `nodus-context join` on each client.
 
 Pipe-friendly:
 

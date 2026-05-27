@@ -69,6 +69,28 @@ test("[http] bearer token auth is enforced", async () => {
   }
 })
 
+test("[http] server rejects oversized request bodies with 413", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "nodus-ctx-413-"))
+  const local = new LocalBackend({ rootDir: dir })
+  await local.init()
+  const server = await startStubServer(local)
+  try {
+    // 1 MB body — well over MAX_REQUEST_BYTES (2 × 256 KB = 512 KB).
+    const huge = "x".repeat(1024 * 1024)
+    const res = await fetch(`${server.url}/entries/big/note`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ body: huge }),
+    })
+    assert.equal(res.status, 413, "expected 413 Payload Too Large")
+    const json = (await res.json()) as { error?: string }
+    assert.match(json.error ?? "", /exceeds/)
+  } finally {
+    await server.close()
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
 test("[http] surfaces server timeout as BackendError", async () => {
   // Server that never responds
   const { createServer } = await import("node:http")

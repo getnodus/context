@@ -1,6 +1,17 @@
 import type { IncomingMessage, ServerResponse } from "node:http"
+import { timingSafeEqual } from "node:crypto"
 import type { ContextBackend } from "../backends/index.js"
+import { MAX_BODY_BYTES } from "../backends/index.js"
 import { packageVersion } from "../cli/version.js"
+
+// Cap request bodies at 2× MAX_BODY_BYTES so the entry-size limit applies
+// after JSON overhead. Anything beyond is rejected with 413 before reaching
+// the backend.
+const MAX_REQUEST_BYTES = MAX_BODY_BYTES * 2
+
+// Reasonable upper bound for any list/search limit; protects against
+// callers passing limit=999999999 to force a full table scan.
+const MAX_LIMIT = 1000
 
 export interface HandlerOptions {
   /** If set, requests must include `Authorization: Bearer <token>`. */
@@ -31,7 +42,7 @@ export function createHandler(
     try {
       if (options.token) {
         const auth = req.headers["authorization"]
-        if (auth !== `Bearer ${options.token}`) {
+        if (!tokenMatches(auth, options.token)) {
           status = 401
           res.statusCode = 401
           res.end()
@@ -69,7 +80,6 @@ export function createHandler(
           | "updated-asc"
           | "id-asc"
           | null
-        const limit = url.searchParams.get("limit")
         const includeExpired = url.searchParams.has("includeExpired")
         const entries = await backend.list({
           prefix,
@@ -77,7 +87,7 @@ export function createHandler(
           type: types.length > 0 ? types : undefined,
           author: authors.length > 0 ? authors : undefined,
           ...(sort ? { sort } : {}),
-          limit: limit ? parseInt(limit, 10) : undefined,
+          limit: parsePositiveInt(url.searchParams.get("limit")),
           includeExpired,
         })
         sendJson(res, 200, { entries })
@@ -143,6 +153,11 @@ export function createHandler(
       if (method === "PUT" && segments[0] === "entries" && segments.length >= 2) {
         const id = segments.slice(1).map(decodeURIComponent).join("/")
         const body = await readBody(req)
+        if (body === TOO_LARGE) {
+          status = 413
+          sendJson(res, 413, { error: `request body exceeds ${MAX_REQUEST_BYTES} bytes` })
+          return
+        }
         const parsed = body ? JSON.parse(body) : {}
         const entry = await backend.write({
           id,
@@ -184,8 +199,13 @@ export function createHandler(
           return
         }
         const body = await readBody(req)
+        if (body === TOO_LARGE) {
+          status = 413
+          sendJson(res, 413, { error: `request body exceeds ${MAX_REQUEST_BYTES} bytes` })
+          return
+        }
         const parsed = body ? JSON.parse(body) : {}
-        const entry = await backend.revert(id, parsed.snapshot)
+        const entry = await backend.revert(id, parsed.snapshot, parsed.author)
         sendJson(res, 200, entry)
         return
       }
@@ -193,9 +213,8 @@ export function createHandler(
       // GET /search?q=...
       if (method === "GET" && segments[0] === "search") {
         const q = url.searchParams.get("q") ?? ""
-        const limit = url.searchParams.get("limit")
         const hits = await backend.search(q, {
-          limit: limit ? parseInt(limit, 10) : undefined,
+          limit: parsePositiveInt(url.searchParams.get("limit")),
         })
         sendJson(res, 200, { hits })
         return
@@ -233,10 +252,42 @@ function sendJson(res: ServerResponse, status: number, body: unknown) {
   res.end(JSON.stringify(body))
 }
 
-async function readBody(req: IncomingMessage): Promise<string> {
+/**
+ * Sentinel returned from `readBody` when the request exceeds
+ * `MAX_REQUEST_BYTES`. Callers check `=== TOO_LARGE` and respond 413
+ * before parsing.
+ */
+const TOO_LARGE = Symbol("request-body-too-large")
+
+async function readBody(req: IncomingMessage): Promise<string | typeof TOO_LARGE> {
   const chunks: Buffer[] = []
+  let total = 0
   for await (const chunk of req) {
-    chunks.push(typeof chunk === "string" ? Buffer.from(chunk) : chunk)
+    const buf = typeof chunk === "string" ? Buffer.from(chunk) : chunk
+    total += buf.length
+    if (total > MAX_REQUEST_BYTES) {
+      // Drain the rest of the request so the client doesn't see a reset
+      // before our response lands. for-await over `req` continues naturally.
+      return TOO_LARGE
+    }
+    chunks.push(buf)
   }
   return Buffer.concat(chunks).toString("utf8")
+}
+
+function parsePositiveInt(value: string | null): number | undefined {
+  if (!value) return undefined
+  const n = parseInt(value, 10)
+  if (!Number.isFinite(n) || n <= 0) return undefined
+  return Math.min(n, MAX_LIMIT)
+}
+
+function tokenMatches(headerValue: string | string[] | undefined, expected: string): boolean {
+  if (typeof headerValue !== "string") return false
+  const prefix = "Bearer "
+  if (!headerValue.startsWith(prefix)) return false
+  const provided = Buffer.from(headerValue.slice(prefix.length))
+  const target = Buffer.from(expected)
+  if (provided.length !== target.length) return false
+  return timingSafeEqual(provided, target)
 }

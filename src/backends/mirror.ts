@@ -92,8 +92,11 @@ export class MirrorBackend implements ContextBackend {
       remote = await this.#secondary.read(id)
     } catch (e) {
       if (e instanceof ContextNotFoundError) throw new ContextNotFoundError(id)
+      // Surface the real failure (e.g. server unreachable) instead of
+      // pretending the entry is missing — otherwise the caller can't
+      // distinguish "doesn't exist" from "couldn't ask."
       this.#onError("read-fallback", e as Error)
-      throw new ContextNotFoundError(id)
+      throw e
     }
     try {
       await this.#primary.write({
