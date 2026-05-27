@@ -143,7 +143,7 @@ export interface BackendDescription {
 }
 
 /**
- * Contract for any storage backend behind @nodus/context.
+ * Contract for any storage backend behind @getnodus/context.
  *
  * Required methods provide CRUD + search + tag listing. History-related
  * methods are optional — backends without history support should leave

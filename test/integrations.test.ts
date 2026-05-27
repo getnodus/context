@@ -11,27 +11,39 @@ import {
   localMcpCommand,
   AgentTarget,
 } from "../src/cli/integrations.js"
+import type { AgentDefinition } from "../src/cli/agents/index.js"
 
-async function targetFile() {
+async function targetFile(keyPath?: string[]) {
   const dir = await mkdtemp(join(tmpdir(), "nodus-ctx-int-"))
+  const configPath = join(dir, "config.json")
+  const definition: AgentDefinition = {
+    id: "test",
+    name: "Test Agent",
+    configPathHint: configPath,
+    detect: { type: "always" },
+    install: { type: "json-merge", path: configPath, ...(keyPath ? { keyPath } : {}) },
+  }
   return {
     target: {
       id: "test",
       name: "Test Agent",
-      configPath: join(dir, "config.json"),
+      configPath,
       detected: true,
+      source: "custom" as const,
+      definition,
     } as AgentTarget,
+    configPath,
     cleanup: () => rm(dir, { recursive: true, force: true }),
   }
 }
 
 test("installMcp creates config and writes server entry", async () => {
-  const { target, cleanup } = await targetFile()
+  const { target, configPath, cleanup } = await targetFile()
   try {
     const result = await installMcp(target, mcpCommand())
     assert.equal(result.status, "installed")
 
-    const parsed = JSON.parse(await readFile(target.configPath, "utf8"))
+    const parsed = JSON.parse(await readFile(configPath, "utf8"))
     assert.ok(parsed.mcpServers["nodus-context"])
     assert.equal(parsed.mcpServers["nodus-context"].command, "npx")
   } finally {
@@ -64,10 +76,10 @@ test("installMcp reports update when command changes", async () => {
 })
 
 test("installMcp preserves other mcpServers entries", async () => {
-  const { target, cleanup } = await targetFile()
+  const { target, configPath, cleanup } = await targetFile()
   try {
     await writeFile(
-      target.configPath,
+      configPath,
       JSON.stringify({
         mcpServers: { "some-other": { command: "node", args: ["x"] } },
         otherKey: "preserved",
@@ -75,7 +87,7 @@ test("installMcp preserves other mcpServers entries", async () => {
       "utf8",
     )
     await installMcp(target, mcpCommand())
-    const parsed = JSON.parse(await readFile(target.configPath, "utf8"))
+    const parsed = JSON.parse(await readFile(configPath, "utf8"))
     assert.ok(parsed.mcpServers["some-other"])
     assert.ok(parsed.mcpServers["nodus-context"])
     assert.equal(parsed.otherKey, "preserved")
@@ -92,6 +104,31 @@ test("uninstallMcp removes only our entry", async () => {
     assert.equal(removed, true)
     const second = await uninstallMcp(target)
     assert.equal(second, false)
+  } finally {
+    await cleanup()
+  }
+})
+
+// New: json-merge with a custom keyPath (e.g. Zed's `context_servers`).
+test("installMcp respects keyPath override", async () => {
+  const { target, configPath, cleanup } = await targetFile(["context_servers"])
+  try {
+    await installMcp(target, mcpCommand())
+    const parsed = JSON.parse(await readFile(configPath, "utf8"))
+    assert.ok(parsed.context_servers["nodus-context"], "entry should land under context_servers")
+    assert.equal(parsed.mcpServers, undefined, "mcpServers key should not be created")
+  } finally {
+    await cleanup()
+  }
+})
+
+// New: nested keyPath ([] segments traversed/created in order).
+test("installMcp creates nested keyPath chain", async () => {
+  const { target, configPath, cleanup } = await targetFile(["nested", "deep", "servers"])
+  try {
+    await installMcp(target, mcpCommand())
+    const parsed = JSON.parse(await readFile(configPath, "utf8"))
+    assert.ok(parsed.nested.deep.servers["nodus-context"])
   } finally {
     await cleanup()
   }

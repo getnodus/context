@@ -8,11 +8,14 @@ export {
   type ProfileLocal,
   type ProfileHttp,
   type ProfileModule,
+  type ProfileMirror,
 } from "./factory.js"
+export { MirrorBackend, type MirrorBackendOptions } from "./mirror.js"
 export { getDefaultLocalDir, getNodusConfigDir } from "./paths.js"
 export {
   type EmbeddingProvider,
   OllamaEmbedder,
   type OllamaEmbedderOptions,
   cosineSimilarity,
+  makeEmbedderFromEnv,
 } from "./embeddings.js"

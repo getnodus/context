@@ -23,7 +23,13 @@ import {
   cmdProfileRemove,
   cmdUse,
 } from "./commands/profile.js"
+import { cmdSync } from "./commands/sync.js"
+import { cmdAgentsAdd, cmdAgentsList, cmdAgentsRemove } from "./commands/agents.js"
+import { cmdJoin } from "./commands/join.js"
+import { cmdSetup } from "./commands/setup.js"
+import { cmdCapabilities } from "./commands/capabilities.js"
 import { bold, cyan, dim, fail, info } from "./output.js"
+import { packageVersion } from "./version.js"
 
 const USAGE = `${bold("nodus-context")} — personal context layer for AI agents
 
@@ -31,17 +37,31 @@ ${bold("Usage:")}
   ${cyan("nodus-context")} <command> [args]
 
 ${bold("Setup:")}
-  init [--yes] [--local] [--dry-run] [--only=<id>]
-                                   Register MCP server with detected agents
+  init                             Interactive setup wizard
+                                   (asks where context lives + which agents to install)
+  setup --backend=local|server|mirror [--url=<u>] [--token=<t>] [--agents=detected|all|<a,b>] [--json]
+                                   Non-interactive AI-friendly setup (single deterministic command)
+  join <pairing-string>            One-shot: paste nodus://… string, configure profile + install MCPs
   uninstall [--yes] [--dry-run] [--only=<id>]
                                    Remove the MCP server from detected agents
-  doctor                           Show config, backend, integration status
+  doctor [--json]                  Show config, backend, integration status
+  capabilities [--json]            Print supported features for AI orientation
+
+${bold("Agents:")}
+  agents list [--json]             List built-in + custom agents and detection
+  agents add <id> --json-path=<file> [--name=<n>] [--key=mcpServers]
+                                 [--detect-app=<Name>] [--detect-cmd=<bin>]
+                                 [--detect-path=<file>] [--detect-always]
+                                 [--notes=<text>] [-f]
+                                   Register a custom agent (saved to config)
+  agents rm <id>                   Remove a custom agent
 
 ${bold("Profiles:")}
   use <name>                       Switch active profile
   profile list                     List profiles
   profile add <name> --type=<t> [--url=<u> --token=<t> --path=<p> --options=<json>] [--use]
-                                   Add a profile (type: local | http | module)
+                                   Add a profile (type: local | http | module | mirror)
+                                   mirror: local primary + http secondary (--url required)
   profile rm <name>                Remove a profile
   config show                      Print the full config
   config path                      Print path to config file
@@ -66,6 +86,10 @@ ${bold("History:")}
 ${bold("Portability:")}
   export [--out=<file>]            Export all entries to JSON
   import <file> [--overwrite]      Import entries from a bundle
+  sync push|pull <other-profile> [--overwrite] [--dry-run] [-y]
+  sync push|pull --from=<p> --to=<p> [--overwrite] [--dry-run] [-y]
+                                   Copy entries between profiles
+                                   (push: active→other; pull: other→active)
 
 ${bold("Other:")}
   path [<id>]                      Print disk path of root or an entry
@@ -90,7 +114,7 @@ async function main(argv: string[]): Promise<void> {
     case "uninstall":
       return runUninstall(parseUninstall(rest))
     case "doctor":
-      return cmdDoctor()
+      return cmdDoctor(parseDoctor(rest))
     case "use":
       return cmdUse(parseUse(rest))
     case "profile": {
@@ -148,6 +172,31 @@ async function main(argv: string[]): Promise<void> {
       return cmdExport(parseExport(rest))
     case "import":
       return cmdImport(parseImport(rest))
+    case "sync":
+      return cmdSync(parseSync(rest))
+    case "join":
+      return cmdJoin(parseJoin(rest))
+    case "setup":
+      return cmdSetup(parseSetup(rest))
+    case "capabilities":
+      return cmdCapabilities(parseCapabilities(rest))
+    case "agents": {
+      const [sub, ...subRest] = rest
+      switch (sub) {
+        case undefined:
+        case "list":
+        case "ls":
+          return cmdAgentsList(parseAgentsList(subRest))
+        case "add":
+          return cmdAgentsAdd(parseAgentsAdd(subRest))
+        case "rm":
+        case "remove":
+        case "delete":
+          return cmdAgentsRemove(parseAgentsRemove(subRest))
+        default:
+          fail(`unknown 'agents' subcommand: ${sub}`)
+      }
+    }
     case "path":
       return cmdPath(rest[0])
     case "mcp":
@@ -156,7 +205,7 @@ async function main(argv: string[]): Promise<void> {
     case "version":
     case "--version":
     case "-v":
-      info("0.0.3")
+      info(packageVersion())
       return
     default:
       fail(`unknown command: ${cmd}\n\nrun '${bold("nodus-context help")}' for usage`)
@@ -170,6 +219,9 @@ function parseInit(args: string[]) {
       yes: { type: "boolean", short: "y" },
       only: { type: "string", multiple: true },
       local: { type: "boolean" },
+      repair: { type: "boolean" },
+      wizard: { type: "boolean" },
+      "no-wizard": { type: "boolean" },
       "dry-run": { type: "boolean" },
     },
     allowPositionals: true,
@@ -178,6 +230,9 @@ function parseInit(args: string[]) {
     yes: parsed.values.yes,
     only: parsed.values.only,
     local: parsed.values.local,
+    repair: parsed.values.repair,
+    wizard: parsed.values.wizard,
+    noWizard: parsed.values["no-wizard"],
     dryRun: parsed.values["dry-run"],
   }
 }
@@ -416,6 +471,157 @@ function parseExport(args: string[]) {
     allowPositionals: true,
   })
   return { out: parsed.values.out }
+}
+
+function parseDoctor(args: string[]) {
+  const parsed = parseArgs({
+    args,
+    options: { json: { type: "boolean" } },
+    allowPositionals: true,
+  })
+  return { json: parsed.values.json }
+}
+
+function parseSetup(args: string[]) {
+  const parsed = parseArgs({
+    args,
+    options: {
+      backend: { type: "string" },
+      url: { type: "string" },
+      token: { type: "string" },
+      agents: { type: "string" },
+      profile: { type: "string" },
+      json: { type: "boolean" },
+    },
+    allowPositionals: true,
+  })
+  const backend = parsed.values.backend as "local" | "server" | "mirror" | undefined
+  if (backend && !["local", "server", "mirror"].includes(backend)) {
+    fail(`setup: --backend must be one of local | server | mirror`)
+  }
+  return {
+    backend,
+    url: parsed.values.url,
+    token: parsed.values.token,
+    agents: parsed.values.agents,
+    profile: parsed.values.profile,
+    json: parsed.values.json,
+  }
+}
+
+function parseCapabilities(args: string[]) {
+  const parsed = parseArgs({
+    args,
+    options: { json: { type: "boolean" } },
+    allowPositionals: true,
+  })
+  return { json: parsed.values.json }
+}
+
+function parseJoin(args: string[]) {
+  const parsed = parseArgs({
+    args,
+    options: {
+      name: { type: "string" },
+      "no-install": { type: "boolean" },
+      json: { type: "boolean" },
+    },
+    allowPositionals: true,
+  })
+  const pairingString = parsed.positionals[0]
+  if (!pairingString) fail("join: missing <pairing-string>")
+  return {
+    pairingString,
+    name: parsed.values.name,
+    noInstall: parsed.values["no-install"],
+    json: parsed.values.json,
+  }
+}
+
+function parseAgentsList(args: string[]) {
+  const parsed = parseArgs({
+    args,
+    options: { json: { type: "boolean" } },
+    allowPositionals: true,
+  })
+  return { json: parsed.values.json }
+}
+
+function parseAgentsAdd(args: string[]) {
+  const parsed = parseArgs({
+    args,
+    options: {
+      name: { type: "string" },
+      "json-path": { type: "string" },
+      key: { type: "string", multiple: true },
+      "detect-app": { type: "string" },
+      "detect-cmd": { type: "string" },
+      "detect-path": { type: "string" },
+      "detect-always": { type: "boolean" },
+      notes: { type: "string" },
+      force: { type: "boolean", short: "f" },
+    },
+    allowPositionals: true,
+  })
+  const id = parsed.positionals[0]
+  if (!id) fail("agents add: missing <id>")
+  return {
+    id,
+    name: parsed.values.name,
+    jsonPath: parsed.values["json-path"],
+    key: parsed.values.key,
+    detectApp: parsed.values["detect-app"],
+    detectCommand: parsed.values["detect-cmd"],
+    detectPath: parsed.values["detect-path"],
+    detectAlways: parsed.values["detect-always"],
+    notes: parsed.values.notes,
+    force: parsed.values.force,
+  }
+}
+
+function parseAgentsRemove(args: string[]) {
+  const parsed = parseArgs({ args, options: {}, allowPositionals: true })
+  const id = parsed.positionals[0]
+  if (!id) fail("agents rm: missing <id>")
+  return { id }
+}
+
+function parseSync(args: string[]) {
+  const parsed = parseArgs({
+    args,
+    options: {
+      from: { type: "string" },
+      to: { type: "string" },
+      overwrite: { type: "boolean" },
+      "dry-run": { type: "boolean" },
+      yes: { type: "boolean", short: "y" },
+    },
+    allowPositionals: true,
+  })
+  const direction = parsed.positionals[0]
+  if (direction !== "push" && direction !== "pull") {
+    fail("sync: first argument must be 'push' or 'pull'")
+  }
+  const active = parsed.positionals[1] // optional: explicit other profile when from/to omitted
+  let from = parsed.values.from
+  let to = parsed.values.to
+  if (!from && !to) {
+    // Shorthand: `sync push <other>` means active → other; `sync pull <other>` means other → active.
+    if (!active) {
+      fail("sync: provide --from and --to, or pass a profile name (active is the other side)")
+    }
+    // Resolve active profile lazily — keep parser pure here, sync command can call loadConfig.
+    if (direction === "push") {
+      from = "__ACTIVE__"
+      to = active
+    } else {
+      from = active
+      to = "__ACTIVE__"
+    }
+  } else if (!from || !to) {
+    fail("sync: pass both --from and --to, or use the shorthand: sync <push|pull> <other-profile>")
+  }
+  return { direction: direction as "push" | "pull", from: from!, to: to!, overwrite: parsed.values.overwrite, dryRun: parsed.values["dry-run"], yes: parsed.values.yes }
 }
 
 function parseImport(args: string[]) {

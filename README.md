@@ -1,17 +1,19 @@
-# @nodus/context
+# @getnodus/context
 
 Personal context layer for AI agents. Your memory, portable across every agent you use.
 
-Every agent you talk to starts from zero — Claude doesn't know what Cursor learned about you, Cursor doesn't know what ChatGPT learned. `@nodus/context` is one place that stores facts about you (identity, preferences, projects, decisions). Any agent that speaks MCP can read from and write to it. You own the data.
+Every agent you talk to starts from zero — Claude doesn't know what Cursor learned about you, Cursor doesn't know what ChatGPT learned. `@getnodus/context` is one place that stores facts about you (identity, preferences, projects, decisions). Any agent that speaks MCP can read from and write to it. You own the data.
 
 The storage is pluggable. By default it's markdown files on your disk; you can also point it at a remote server (your own, or a hosted one) without changing how any agent or CLI command works.
 
 ## Quick start
 
 ```sh
-npx @nodus/context init        # register with Claude Desktop, Claude Code, Cursor
-npx @nodus/context doctor      # show backend + integration status
+npx -p @getnodus/context nodus-context init        # register with Claude Desktop, Claude Code, Cursor
+npx -p @getnodus/context nodus-context doctor      # show backend + integration status
 ```
+
+After install you can also just call `nodus-context` directly (it's added to your `$PATH` by `npm i -g @getnodus/context` or via `pnpm`/`bun` global installs).
 
 Restart your agent. It now has tools to read and write your context.
 
@@ -172,7 +174,7 @@ For HTTP backends, semantic search is whatever the server implements — the cli
 Backends are just classes that implement the `ContextBackend` interface. From a third-party package:
 
 ```ts
-import type { ContextBackend, WriteInput, ContextEntry } from "@nodus/context"
+import type { ContextBackend, WriteInput, ContextEntry } from "@getnodus/context"
 
 export function createBackend(options: { /* your options */ }): ContextBackend {
   return {

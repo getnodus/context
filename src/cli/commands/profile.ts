@@ -63,8 +63,24 @@ export async function cmdProfileAdd(args: ProfileAddArgs): Promise<void> {
       profile = { type: "module", path: args.path, options: parsedOptions }
       break
     }
+    case "mirror": {
+      // Mirror profile: local primary + http secondary inferred from --url.
+      // This is the common shape; more exotic combinations can be hand-edited
+      // in ~/.nodus/config.json — the factory handles arbitrary nesting.
+      if (!args.url) fail("--url required for mirror backend (the remote secondary)")
+      profile = {
+        type: "mirror",
+        primary: { type: "local", ...(args.rootDir ? { rootDir: args.rootDir } : {}) },
+        secondary: {
+          type: "http",
+          url: args.url,
+          ...(args.token ? { token: args.token } : {}),
+        },
+      }
+      break
+    }
     default:
-      fail(`unknown backend type: ${args.type} (expected local, http, or module)`)
+      fail(`unknown backend type: ${args.type} (expected local, http, module, or mirror)`)
   }
 
   config.profiles[args.name] = profile
@@ -103,7 +119,14 @@ export async function cmdConfigShow(args: { json?: boolean }): Promise<void> {
     process.stdout.write(JSON.stringify(config, null, 2) + "\n")
     return
   }
-  process.stdout.write(JSON.stringify(config, null, 2) + "\n")
+  const { configPath } = await import("../../config/index.js")
+  info(`${dim("config:")} ${cyan(configPath())}`)
+  info(`${dim("active:")} ${cyan(config.activeProfile)}`)
+  info(bold("profiles"))
+  for (const [name, profile] of Object.entries(config.profiles)) {
+    const marker = name === config.activeProfile ? green("●") : dim("○")
+    info(`  ${marker} ${cyan(name.padEnd(16))} ${dim(describe(profile))}`)
+  }
 }
 
 export async function cmdConfigPath(): Promise<void> {
@@ -119,6 +142,8 @@ function describe(profile: Profile): string {
       return `http ${profile.url}${profile.token ? " (auth)" : ""}`
     case "module":
       return `module ${profile.path}`
+    case "mirror":
+      return `mirror(${describe(profile.primary)} → ${describe(profile.secondary)})`
     default:
       return (profile as { type: string }).type
   }

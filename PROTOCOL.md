@@ -1,6 +1,6 @@
 # Nodus Context HTTP Protocol
 
-Specification for servers that want to act as a remote backend for `@nodus/context`. Any service implementing these endpoints can be configured as an `http` profile in a user's `~/.nodus/config.json` and used transparently by the CLI and MCP server.
+Specification for servers that want to act as a remote backend for `@getnodus/context`. Any service implementing these endpoints can be configured as an `http` profile in a user's `~/.nodus/config.json` and used transparently by the CLI and MCP server.
 
 The reference implementation lives in `test/stub-server.ts`. The conformance suite in `test/conformance.ts` exercises every required behavior — point it at your server to verify compliance.
 
