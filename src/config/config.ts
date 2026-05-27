@@ -2,11 +2,19 @@ import { mkdir, readFile, rename, writeFile } from "node:fs/promises"
 import { dirname, join } from "node:path"
 import { randomBytes } from "node:crypto"
 import { getNodusConfigDir, Profile } from "../backends/index.js"
+import type { AgentDefinition } from "../cli/agents/types.js"
 
 export interface NodusConfig {
   /** Name of the currently-active profile. Must be a key in profiles. */
   activeProfile: string
   profiles: Record<string, Profile>
+  /**
+   * User-declared MCP agents. Loaded in addition to the built-in registry.
+   * Use this to teach `nodus-context` about an MCP client we don't ship
+   * built-in support for, without forking. An entry whose id matches a
+   * built-in shadows the built-in (useful for overriding a config path).
+   */
+  customAgents?: AgentDefinition[]
 }
 
 const DEFAULT_PROFILE_NAME = "default"
@@ -84,5 +92,13 @@ export function normalizeConfig(value: unknown): NodusConfig {
     activeProfile = first
   }
 
-  return { activeProfile, profiles }
+  const customAgents = Array.isArray(v.customAgents)
+    ? (v.customAgents as AgentDefinition[])
+    : undefined
+
+  return {
+    activeProfile,
+    profiles,
+    ...(customAgents ? { customAgents } : {}),
+  }
 }

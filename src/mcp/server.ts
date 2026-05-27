@@ -13,6 +13,7 @@ import {
   ContextEntrySummary,
 } from "../backends/index.js"
 import { getActiveProfile } from "../config/index.js"
+import { packageVersion } from "../cli/version.js"
 
 const ID_FIELD = z
   .string()
@@ -33,7 +34,7 @@ export async function run() {
   const server = new McpServer(
     {
       name: "nodus-context",
-      version: "0.0.5",
+      version: packageVersion(),
     },
     {
       instructions:
@@ -211,7 +212,7 @@ export async function run() {
       mimeType: "text/markdown",
     },
     async (uri) => {
-      const brief = await renderBrief(backend)
+      const brief = await renderBrief(backend, desc)
       return {
         contents: [{ uri: uri.href, mimeType: "text/markdown", text: brief }],
       }
@@ -283,14 +284,28 @@ export async function run() {
   await server.connect(transport)
 }
 
-async function renderBrief(backend: ContextBackend): Promise<string> {
-  const [rules, preferences, identity] = await Promise.all([
+async function renderBrief(
+  backend: ContextBackend,
+  desc: import("../backends/index.js").BackendDescription,
+): Promise<string> {
+  const [rules, preferences, identity, all] = await Promise.all([
     backend.list({ type: "rule" }),
     backend.list({ type: "preference" }),
     backend.list({ prefix: "user/" }),
+    backend.list(),
   ])
 
-  const lines: string[] = ["# User context brief", ""]
+  const caps: string[] = []
+  if (desc.capabilities.history) caps.push("history")
+  if (desc.capabilities.semanticSearch) caps.push("semantic search")
+  const capStr = caps.length > 0 ? ` · ${caps.join(", ")}` : ""
+
+  const lines: string[] = [
+    "# User context brief",
+    "",
+    `_Backend: **${desc.type}** — ${desc.label} · ${all.length} entries${capStr}_`,
+    "",
+  ]
   const sections: Array<[string, ContextEntrySummary[]]> = [
     ["Rules (must follow)", rules],
     ["Preferences (respect when possible)", preferences],

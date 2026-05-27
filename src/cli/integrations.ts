@@ -1,148 +1,102 @@
-import { homedir, platform } from "node:os"
-import { dirname, join } from "node:path"
-import { readFile, writeFile, mkdir, stat } from "node:fs/promises"
+/**
+ * Thin compatibility layer that re-exports the agent registry under the
+ * names other CLI commands have historically imported. The actual logic
+ * lives in `./agents/registry.ts`; this file is what `init`, `uninstall`,
+ * and `doctor` import.
+ *
+ * Keeping a stable surface here means the registry internals can evolve
+ * (more install kinds, richer detection) without rippling out to every
+ * call site.
+ */
 
-export interface AgentTarget {
-  /** Stable id used in CLI flags and messages. */
-  id: string
-  /** Display name. */
-  name: string
-  /** Absolute path to the config file. */
-  configPath: string
-  /** True if the config file (or its parent app dir) currently exists. */
-  detected: boolean
-}
+import {
+  inspectMcpHealth as _inspectMcpHealth,
+  installAgent,
+  loadAgents,
+  mcpCommandLocalNode,
+  mcpCommandNpx,
+  readMcp as _readMcp,
+  resolveAgents,
+  uninstallAgent,
+  type McpCommand,
+  type McpHealth,
+  type ResolvedAgent,
+} from "./agents/registry.js"
 
-const MCP_KEY = "nodus-context"
+export type AgentTarget = ResolvedAgent
 
-interface McpServerConfig {
+export interface McpServerConfig {
   command: string
   args: string[]
+  env?: Record<string, string>
 }
 
 export function mcpCommand(): McpServerConfig {
-  return { command: "npx", args: ["-y", "@nodus/context", "mcp"] }
+  return mcpCommandNpx()
 }
 
 export function localMcpCommand(distPath: string): McpServerConfig {
-  return { command: "node", args: [distPath] }
+  return mcpCommandLocalNode(distPath)
 }
 
 export async function detectTargets(): Promise<AgentTarget[]> {
-  const home = homedir()
-  const os = platform()
+  return resolveAgents()
+}
 
-  const claudeDesktopPath =
-    os === "darwin"
-      ? join(home, "Library", "Application Support", "Claude", "claude_desktop_config.json")
-      : os === "win32"
-        ? join(process.env.APPDATA ?? home, "Claude", "claude_desktop_config.json")
-        : join(home, ".config", "Claude", "claude_desktop_config.json")
-
-  const claudeDesktopParent =
-    os === "darwin"
-      ? join(home, "Library", "Application Support", "Claude")
-      : os === "win32"
-        ? join(process.env.APPDATA ?? home, "Claude")
-        : join(home, ".config", "Claude")
-
-  const claudeCodePath = join(home, ".claude.json")
-  const cursorPath = join(home, ".cursor", "mcp.json")
-  const cursorParent = join(home, ".cursor")
-
-  const targets: AgentTarget[] = [
-    {
-      id: "claude-desktop",
-      name: "Claude Desktop",
-      configPath: claudeDesktopPath,
-      detected: await exists(claudeDesktopPath) || await exists(claudeDesktopParent),
-    },
-    {
-      id: "claude-code",
-      name: "Claude Code",
-      configPath: claudeCodePath,
-      detected: await exists(claudeCodePath),
-    },
-    {
-      id: "cursor",
-      name: "Cursor",
-      configPath: cursorPath,
-      detected: await exists(cursorPath) || await exists(cursorParent),
-    },
-  ]
-
-  return targets
+export async function readMcp(target: AgentTarget): Promise<McpServerConfig | undefined> {
+  return _readMcp(target)
 }
 
 export interface InstallResult {
   target: AgentTarget
-  status: "installed" | "already-installed" | "updated"
+  status: "installed" | "updated" | "already-installed"
 }
 
 export async function installMcp(
   target: AgentTarget,
-  serverConfig: McpServerConfig,
+  cmd: McpServerConfig,
 ): Promise<InstallResult> {
-  const config = await readJsonConfig(target.configPath)
-  const servers = (config.mcpServers ??= {}) as Record<string, McpServerConfig>
-  const existing = servers[MCP_KEY]
-  let status: InstallResult["status"]
-
-  if (!existing) {
-    status = "installed"
-  } else if (sameConfig(existing, serverConfig)) {
-    status = "already-installed"
-  } else {
-    status = "updated"
-  }
-
-  servers[MCP_KEY] = serverConfig
-  await writeJsonConfig(target.configPath, config)
-  return { target, status }
+  const result = await installAgent(target, cmd as McpCommand)
+  return { target, status: result.status }
 }
 
 export async function uninstallMcp(target: AgentTarget): Promise<boolean> {
-  const config = await readJsonConfig(target.configPath)
-  const servers = config.mcpServers as Record<string, unknown> | undefined
-  if (!servers || !(MCP_KEY in servers)) return false
-  delete servers[MCP_KEY]
-  await writeJsonConfig(target.configPath, config)
-  return true
+  return uninstallAgent(target)
 }
 
-export async function readMcp(target: AgentTarget): Promise<McpServerConfig | undefined> {
-  const config = await readJsonConfig(target.configPath)
-  const servers = config.mcpServers as Record<string, McpServerConfig> | undefined
-  return servers?.[MCP_KEY]
+export { inspectMcpHealth, type McpHealth } from "./agents/registry.js"
+export { loadAgents }
+
+/**
+ * Whether the agent has a native CLI helper we can shell out to. Only
+ * the registry knows the install spec, so callers can use this to choose
+ * messaging (e.g. "via claude mcp add").
+ */
+export function hasNativeInstaller(target: AgentTarget): boolean {
+  return target.definition.install.type === "cli-mcp"
 }
 
-async function exists(p: string): Promise<boolean> {
-  try {
-    await stat(p)
-    return true
-  } catch {
-    return false
-  }
+export async function nativeInstallerAvailable(target: AgentTarget): Promise<boolean> {
+  // The registry's writeByInstall already does the right thing — if the
+  // CLI is unavailable it transparently falls back to JSON. This helper
+  // exists for messaging only; we return true when the install spec
+  // *prefers* a native CLI, regardless of whether the binary is on PATH.
+  return hasNativeInstaller(target)
 }
 
-async function readJsonConfig(path: string): Promise<Record<string, unknown>> {
-  try {
-    const raw = await readFile(path, "utf8")
-    if (!raw.trim()) return {}
-    return JSON.parse(raw)
-  } catch (e: any) {
-    if (e.code === "ENOENT") return {}
-    throw new Error(`Could not read ${path}: ${e.message}`)
-  }
+// Legacy re-exports kept so callers don't break — they all delegate to
+// the unified installMcp/uninstallMcp which already does the right thing.
+export async function nativeInstall(
+  target: AgentTarget,
+  cmd: McpServerConfig,
+): Promise<{ status: "installed" | "updated" }> {
+  const r = await installMcp(target, cmd)
+  return { status: r.status === "already-installed" ? "installed" : r.status }
 }
 
-async function writeJsonConfig(path: string, data: Record<string, unknown>): Promise<void> {
-  await mkdir(dirname(path), { recursive: true })
-  await writeFile(path, JSON.stringify(data, null, 2) + "\n", "utf8")
+export async function nativeUninstall(target: AgentTarget): Promise<boolean> {
+  return uninstallMcp(target)
 }
 
-function sameConfig(a: McpServerConfig, b: McpServerConfig): boolean {
-  if (a.command !== b.command) return false
-  if (a.args.length !== b.args.length) return false
-  return a.args.every((v, i) => v === b.args[i])
-}
+// Internal-but-exported helpers kept so tests can call them.
+export { _inspectMcpHealth as inspectMcpHealthInternal }
