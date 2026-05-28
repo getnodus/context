@@ -17,6 +17,10 @@ export async function cmdCapabilities(args: CapabilitiesArgs): Promise<void> {
   const capabilities = {
     name: "@getnodus/context",
     version: packageVersion(),
+    docs: {
+      agentPlaybook: "https://github.com/getnodus/context/blob/main/AGENTS.md",
+      protocol: "https://github.com/getnodus/context/blob/main/PROTOCOL.md",
+    },
     protocol: { http: 1, mcp: "stdio" },
     backends: ["local", "http", "mirror", "module"],
     commands: [
@@ -71,6 +75,7 @@ export async function cmdCapabilities(args: CapabilitiesArgs): Promise<void> {
   }
 
   info(bold(`@getnodus/context v${capabilities.version}`))
+  info(`${dim("playbook:")} ${capabilities.docs.agentPlaybook}`)
   info(`${dim("protocol:")} http v${capabilities.protocol.http} · mcp ${capabilities.protocol.mcp}`)
   info(`${dim("backends:")} ${capabilities.backends.join(", ")}`)
   info(`${dim("agents  :")} ${agents.length} known`)

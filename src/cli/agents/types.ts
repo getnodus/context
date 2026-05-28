@@ -85,6 +85,14 @@ export interface InstallJsonMerge {
    * `["mcpServers"]`.
    */
   keyPath?: string[]
+  /**
+   * Shape of the per-server entry value. `standard` (default) writes the
+   * canonical `{command, args, env?}` used by Claude/Cursor/Cline/Zed/etc.
+   * `opencode` writes OpenCode's variant: `{type: "local", command:
+   * [cmd, ...args], enabled: true}`. Read paths inverse-transform so
+   * `readMcp` returns the canonical shape regardless.
+   */
+  entryShape?: "standard" | "opencode"
 }
 
 /**

@@ -123,6 +123,54 @@ test("install + read + uninstall round-trip via custom agent", async () => {
   })
 })
 
+test("OpenCode entryShape writes {type, command-as-array, enabled} and reads back canonical", async () => {
+  await withConfigDir(async (configDir) => {
+    const mcpFile = join(configDir, "opencode.json")
+    const def: AgentDefinition = {
+      id: "opencode-clone",
+      name: "OpenCode-clone",
+      configPathHint: mcpFile,
+      detect: { type: "always" },
+      install: {
+        type: "json-merge",
+        path: mcpFile,
+        keyPath: ["mcp"],
+        entryShape: "opencode",
+      },
+    }
+    const resolved = mkResolved(def)
+    const cmd = mcpCommandNpx()
+    const installed = await installAgent(resolved, cmd)
+    assert.equal(installed.status, "installed")
+
+    // On disk: OpenCode shape — single `command` array, `type: "local"`, `enabled: true`.
+    const raw = JSON.parse(await readFile(mcpFile, "utf8"))
+    const entry = raw.mcp?.["nodus-context"]
+    assert.ok(entry, "entry should land under mcp.nodus-context")
+    assert.equal(entry.type, "local")
+    assert.equal(entry.enabled, true)
+    assert.ok(Array.isArray(entry.command), "command should be a single array")
+    assert.equal(entry.command[0], cmd.command)
+    assert.deepEqual(entry.command.slice(1), cmd.args)
+    assert.equal(entry.args, undefined, "args should NOT be a separate key")
+
+    // Read path inverse-transforms back to canonical {command, args}.
+    const read = await readMcp(resolved)
+    assert.equal(read?.command, cmd.command)
+    assert.deepEqual(read?.args, cmd.args)
+
+    // Re-installing with same command is detected as already-installed
+    // (proves the comparison works on the inverse-transformed shape).
+    const second = await installAgent(resolved, cmd)
+    assert.equal(second.status, "already-installed")
+
+    // Uninstall removes the key cleanly.
+    assert.equal(await uninstallAgent(resolved), true)
+    const after = JSON.parse(await readFile(mcpFile, "utf8"))
+    assert.equal(after.mcp?.["nodus-context"], undefined)
+  })
+})
+
 test("Zed-style keyPath ('context_servers') is honoured", async () => {
   await withConfigDir(async (configDir) => {
     const mcpFile = join(configDir, "zed-settings.json")
