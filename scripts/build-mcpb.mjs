@@ -69,10 +69,14 @@ await copyFile(
 const out = join(root, "dist", `nodus-context-${pkg.version}.mcpb`)
 await rm(out, { force: true })
 
+// Pinned so release output is reproducible — unpinned `npx -y mcpb` would
+// silently pull whatever's latest at release time and could break the format.
+const MCPB_VERSION = "2.1.2"
+
 await new Promise((resolve, reject) => {
   const proc = spawn(
     "npx",
-    ["-y", "@anthropic-ai/mcpb", "pack", stageDir, out],
+    ["-y", `@anthropic-ai/mcpb@${MCPB_VERSION}`, "pack", stageDir, out],
     { stdio: "inherit", cwd: root },
   )
   proc.on("error", reject)

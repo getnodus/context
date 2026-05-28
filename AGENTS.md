@@ -29,7 +29,7 @@ The store is one of:
    context doctor --json
    ```
 
-   Parse the JSON. `capabilities.version` tells you what features exist — if it's less than `0.0.14`, tell the user to upgrade. `doctor.profile`, `doctor.backend`, `doctor.agents`, `doctor.memory`, `doctor.issues` give you a full picture: what's configured, what's broken, what's in the store, and what (if anything) needs cleanup.
+   Parse the JSON. `capabilities.version` tells you what features exist — if it's less than `0.1.0`, tell the user to upgrade (you'll be missing the verify/confirm/accept/merge surface). `doctor.profile`, `doctor.backend`, `doctor.agents`, `doctor.memory`, `doctor.issues` give you a full picture: what's configured, what's broken, what's in the store, and what (if anything) needs cleanup.
 
    **`doctor --json` now folds in `memory` health.** You don't need a second `doctor --memory --json` call to know whether the store has failed verifies, never-checked entries, or duplicates. Use the inline `memory` field for orientation; only run `doctor --memory --json` when you want the full per-entry breakdown.
 
@@ -89,6 +89,23 @@ The store is one of:
 ## How to actually USE the tool from within an MCP session
 
 The setup is one-time. The bulk of your interaction is reading and writing entries inside conversations.
+
+### MCP tool surface at a glance
+
+| Tool | Use when |
+| --- | --- |
+| `read_context(id)` | Fetch one entry by id. |
+| `list_context({prefix, tag, type, limit})` | Survey what's known; filter to narrow. |
+| `search_context(query)` | Find entries by content; every hit carries a `confidence` field. |
+| `list_tags()` | Before inventing a new tag — reuse existing tags so the store stays coherent. |
+| `write_context({id, body, type, tags, supersedes, expires, verify})` | Save or update a durable fact. Returns `relatedExisting[]` and `verifyWarning` you must act on. |
+| `confirm_context([ids])` | Call near end-of-turn on entries you actually cited; runs verify + stamps a confirmation. |
+| `accept_context(id, reason)` | Only after the user explicitly confirms a failing verify is intentional. |
+| `merge_context(from, into, body?)` | Only after the user agrees two entries are duplicates. |
+| `acknowledge_health([keys])` | Call after mentioning brief health issues so they don't reappear next session. |
+| `delete_context(id)` | Only when the user explicitly asks to remove an entry. Prefer `write_context` to revise, or `accept_context` to silence a failing verify. The local backend keeps a snapshot for `context revert <id>` if the user changes their mind. |
+
+Resources (read directly, no tool call needed): `nodus-context://brief` (auto-loaded at session start), `nodus-context://entry/{id}` (one per entry).
 
 ### At session start
 Read the `nodus-context://brief` resource. It gives you rules (always-on directives), preferences (soft preferences), identity, and a `## Memory health` section listing problems the user should be aware of. The brief is loaded automatically by most clients; if yours doesn't, read it explicitly.

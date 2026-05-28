@@ -17,7 +17,7 @@ export interface UpdateArgs {
  * in-place (or whether an update even makes sense — npx is a transient run,
  * not an install).
  */
-type InstallMode = "npm" | "pnpm" | "yarn" | "npx" | "unknown"
+type InstallMode = "npm" | "pnpm" | "yarn" | "npx" | "brew" | "unknown"
 
 interface InstallSite {
   mode: InstallMode
@@ -50,6 +50,17 @@ export function detectInstallSite(): InstallSite {
   const lower = path.toLowerCase()
   if (lower.includes("/_npx/") || lower.includes("\\_npx\\")) {
     return { mode: "npx", path, command: null }
+  }
+  // Homebrew formula install (hypothetical future distribution): the script
+  // lives under a Cellar path. Brew installs that route through brew's node
+  // (the common case today) resolve through `node_modules` and fall through
+  // to the npm branch below — which is correct.
+  if (lower.includes("/cellar/")) {
+    return {
+      mode: "brew",
+      path,
+      command: { cmd: "brew", args: ["upgrade", "nodus-context"] },
+    }
   }
   // pnpm globals live under e.g. ~/Library/pnpm or ~/.local/share/pnpm.
   if (lower.includes("/pnpm/") || lower.includes("\\pnpm\\") || lower.includes("/.pnpm/")) {
@@ -151,6 +162,7 @@ export async function cmdUpdate(args: UpdateArgs = {}): Promise<void> {
     info(`  ${cyan(`npm install -g ${PKG_NAME}@latest`)}`)
     info(`  ${cyan(`pnpm add -g ${PKG_NAME}@latest`)}`)
     info(`  ${cyan(`yarn global add ${PKG_NAME}@latest`)}`)
+    info(`  ${cyan(`brew upgrade nodus-context`)}  ${dim("(if installed via Homebrew formula)")}`)
     return
   }
 
