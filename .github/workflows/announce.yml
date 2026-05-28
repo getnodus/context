@@ -1,0 +1,61 @@
+name: Post project update
+
+on:
+  workflow_dispatch:
+    inputs:
+      title:
+        description: Discussion title
+        required: true
+        type: string
+      body:
+        description: Markdown body
+        required: true
+        type: string
+
+permissions:
+  discussions: write
+
+jobs:
+  post:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create announcement discussion
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TITLE: ${{ inputs.title }}
+          BODY: ${{ inputs.body }}
+        run: |
+          set -euo pipefail
+
+          repo_id=$(gh api graphql -f query='
+            query($owner:String!,$name:String!){
+              repository(owner:$owner,name:$name){ id }
+            }' -F owner="${{ github.repository_owner }}" -F name="${{ github.event.repository.name }}" \
+            -q '.data.repository.id')
+
+          category_id=$(gh api graphql -f query='
+            query($owner:String!,$name:String!){
+              repository(owner:$owner,name:$name){
+                discussionCategories(first:25){ nodes{ id name } }
+              }
+            }' -F owner="${{ github.repository_owner }}" -F name="${{ github.event.repository.name }}" \
+            -q '.data.repository.discussionCategories.nodes[] | select(.name=="Announcements") | .id')
+
+          if [ -z "$category_id" ]; then
+            echo "::error::No 'Announcements' discussion category found."
+            exit 1
+          fi
+
+          url=$(gh api graphql \
+            -f query='
+              mutation($repo:ID!,$cat:ID!,$title:String!,$body:String!){
+                createDiscussion(input:{repositoryId:$repo,categoryId:$cat,title:$title,body:$body}){
+                  discussion{ url }
+                }
+              }' \
+            -F repo="$repo_id" -F cat="$category_id" -F title="$TITLE" -F body="$BODY" \
+            -q '.data.createDiscussion.discussion.url')
+
+          echo "Posted: $url"
+          echo "### Posted" >> "$GITHUB_STEP_SUMMARY"
+          echo "$url" >> "$GITHUB_STEP_SUMMARY"
