@@ -193,12 +193,51 @@ function configPathFor(spec: InstallSpec): string | undefined {
 
 // --------------------------- json-merge implementation ---------------------------
 
+/**
+ * Convert our canonical `{command, args, env?}` into the on-disk shape
+ * the target agent expects. Most agents use the canonical shape directly;
+ * OpenCode wants `{type: "local", command: [cmd, ...args], enabled: true}`.
+ */
+function toEntryShape(cmd: McpCommand, shape: InstallJsonMerge["entryShape"]): unknown {
+  if (shape === "opencode") {
+    const entry: Record<string, unknown> = {
+      type: "local",
+      command: [cmd.command, ...cmd.args],
+      enabled: true,
+    }
+    if (cmd.env) entry.environment = cmd.env
+    return entry
+  }
+  return cmd
+}
+
+/**
+ * Inverse of `toEntryShape`. Lets callers compare existing entries against
+ * the canonical command shape (and return canonical from `readMcp`).
+ * Returns undefined for entries we can't parse — treated as "absent" so
+ * a re-install overwrites.
+ */
+function fromEntryShape(
+  raw: unknown,
+  shape: InstallJsonMerge["entryShape"],
+): McpCommand | undefined {
+  if (!raw || typeof raw !== "object") return undefined
+  if (shape === "opencode") {
+    const o = raw as { type?: string; command?: unknown; environment?: Record<string, string> }
+    if (o.type !== "local" || !Array.isArray(o.command) || o.command.length === 0) return undefined
+    const parts = o.command as string[]
+    const [command, ...args] = parts
+    return { command, args, ...(o.environment ? { env: o.environment } : {}) }
+  }
+  return raw as McpCommand
+}
+
 async function readJsonMerge(spec: InstallJsonMerge): Promise<McpCommand | undefined> {
   const data = await readJsonConfig(expand(spec.path))
   const node = navigate(data, spec.keyPath ?? ["mcpServers"], false)
   if (!node || typeof node !== "object") return undefined
-  const entry = (node as Record<string, McpCommand>)[MCP_KEY]
-  return entry
+  const raw = (node as Record<string, unknown>)[MCP_KEY]
+  return fromEntryShape(raw, spec.entryShape)
 }
 
 async function writeJsonMerge(
@@ -209,14 +248,14 @@ async function writeJsonMerge(
   const data = await readJsonConfig(path)
   const node = navigate(data, spec.keyPath ?? ["mcpServers"], true) as Record<
     string,
-    McpCommand
+    unknown
   >
-  const existing = node[MCP_KEY]
+  const existing = fromEntryShape(node[MCP_KEY], spec.entryShape)
   let status: InstallResult["status"]
   if (!existing) status = "installed"
   else if (sameCommand(existing, cmd)) status = "already-installed"
   else status = "updated"
-  node[MCP_KEY] = cmd
+  node[MCP_KEY] = toEntryShape(cmd, spec.entryShape)
   await writeJsonConfig(path, data)
   return { status }
 }

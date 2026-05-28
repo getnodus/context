@@ -55,6 +55,50 @@ export function builtInAgents(): AgentDefinition[] {
   // ----- Cursor -----
   const cursorConfig = join(home, ".cursor", "mcp.json")
 
+  // ----- Roo Code (VS Code extension by RooVeterinaryInc, a Cline fork) -----
+  // Stores MCP entries under `mcpServers` in mcp_settings.json inside its
+  // globalStorage dir. Extension storage ids are lowercased.
+  const rooCodeConfig = join(
+    vscodeGlobalStorage,
+    "rooveterinaryinc.roo-cline",
+    "settings",
+    "mcp_settings.json",
+  )
+
+  // ----- VS Code GitHub Copilot (native MCP, mcp.json with `servers` key) -----
+  // VS Code's user-level MCP file lives in the User profile dir. Different
+  // file name and key than Cursor / Claude Desktop: `mcp.json` + `servers`.
+  const vscodeUserDir =
+    os === "darwin"
+      ? join(home, "Library", "Application Support", "Code", "User")
+      : os === "win32"
+        ? join(process.env.APPDATA ?? home, "Code", "User")
+        : join(home, ".config", "Code", "User")
+  const vscodeMcpConfig = join(vscodeUserDir, "mcp.json")
+
+  // ----- Gemini CLI (Google) -----
+  // Has `gemini mcp add <name> -- <command...>` (same shape as claude/codex),
+  // with a json fallback at ~/.gemini/settings.json under `mcpServers`.
+  const geminiFallback = join(home, ".gemini", "settings.json")
+
+  // ----- Amp (Sourcegraph) -----
+  // Settings live at ~/.config/amp/settings.json. MCP entries are nested
+  // under the flat key "amp.mcpServers" — a single literal dotted key, not
+  // a path. Local server entry shape matches our {command, args, env}.
+  const ampConfig = join(home, ".config", "amp", "settings.json")
+
+  // ----- OpenClaw -----
+  // The lobster. Config at ~/.openclaw/openclaw.json with MCP entries
+  // nested under `mcp.servers`. Detect via the `openclaw` CLI binary.
+  const openclawConfig = join(home, ".openclaw", "openclaw.json")
+
+  // ----- OpenCode (sst/opencode) -----
+  // Config at ~/.config/opencode/opencode.json. MCP entries nest under
+  // `mcp` BUT use a non-standard per-entry shape: `{type: "local",
+  // command: [cmd, ...args], enabled: true}` instead of the canonical
+  // `{command, args}`. Handled by entryShape: "opencode".
+  const opencodeConfig = join(home, ".config", "opencode", "opencode.json")
+
   return [
     {
       id: "claude-desktop",
@@ -122,6 +166,63 @@ export function builtInAgents(): AgentDefinition[] {
       ],
       install: { type: "json-merge", path: zedConfig, keyPath: ["context_servers"] },
       notes: "Zed nests servers under `context_servers`, not `mcpServers`.",
+    },
+    {
+      id: "vscode",
+      name: "VS Code (GitHub Copilot)",
+      configPathHint: vscodeMcpConfig,
+      detect: [
+        { type: "app-bundle", mac: "Visual Studio Code", win: "Microsoft VS Code/Code.exe", linux: "code" },
+        { type: "command", name: "code" },
+        { type: "path-exists", path: vscodeUserDir },
+      ],
+      install: { type: "json-merge", path: vscodeMcpConfig, keyPath: ["servers"] },
+      notes: "VS Code's MCP file is mcp.json with the `servers` key (not `mcpServers`).",
+    },
+    {
+      id: "roo-code",
+      name: "Roo Code (VS Code)",
+      configPathHint: rooCodeConfig,
+      detect: { type: "path-exists", path: join(vscodeGlobalStorage, "rooveterinaryinc.roo-cline") },
+      install: { type: "json-merge", path: rooCodeConfig },
+      notes: "Installs into the Roo Code extension's mcp_settings.json (Cline-compatible shape).",
+    },
+    {
+      id: "gemini-cli",
+      name: "Gemini CLI",
+      configPathHint: geminiFallback,
+      detect: { type: "command", name: "gemini" },
+      install: { type: "cli-mcp", binary: "gemini", jsonFallbackPath: geminiFallback },
+      notes: "Installed via `gemini mcp add`; falls back to ~/.gemini/settings.json when the CLI isn't on PATH.",
+    },
+    {
+      id: "amp",
+      name: "Amp (Sourcegraph)",
+      configPathHint: ampConfig,
+      detect: { type: "command", name: "amp" },
+      install: { type: "json-merge", path: ampConfig, keyPath: ["amp.mcpServers"] },
+      notes: "Amp uses a flat `amp.mcpServers` key in settings.json — the dot is part of the key, not a path.",
+    },
+    {
+      id: "openclaw",
+      name: "OpenClaw",
+      configPathHint: openclawConfig,
+      detect: { type: "command", name: "openclaw" },
+      install: { type: "json-merge", path: openclawConfig, keyPath: ["mcp", "servers"] },
+      notes: "OpenClaw nests MCP servers under `mcp.servers` in ~/.openclaw/openclaw.json.",
+    },
+    {
+      id: "opencode",
+      name: "OpenCode",
+      configPathHint: opencodeConfig,
+      detect: { type: "command", name: "opencode" },
+      install: {
+        type: "json-merge",
+        path: opencodeConfig,
+        keyPath: ["mcp"],
+        entryShape: "opencode",
+      },
+      notes: "OpenCode entries use {type, command-as-array, enabled} — handled by entryShape: opencode.",
     },
   ]
 }

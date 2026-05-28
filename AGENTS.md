@@ -110,8 +110,29 @@ Resources (read directly, no tool call needed): `nodus-context://brief` (auto-lo
 ### At session start
 Read the `nodus-context://brief` resource. It gives you rules (always-on directives), preferences (soft preferences), identity, and a `## Memory health` section listing problems the user should be aware of. The brief is loaded automatically by most clients; if yours doesn't, read it explicitly.
 
+### Deciding what to save — the embarrassment test
+Before calling `write_context`, ask: *"Would I be embarrassed to make this same mistake — or ask this same question — again next session?"* If yes, save. If no, skip.
+
+This replaces type-category matching with a felt-shame check you can run mid-conversation. Things that pass: capability false-negatives the user corrected, preference reveals, "we tried that and it broke", non-obvious constraints. Things that fail: code structure, file paths, recent commits — re-derivable from the repo or `git log`.
+
+Knowing what to log is the rare trait. Most agents either hoard everything (store rots) or save nothing (user re-teaches the same thing every session). The embarrassment test is concrete enough to act on without thinking.
+
+### The correction reflex — dedup via edit, never by restraint
+When the user contradicts a false claim of yours — especially the pattern *"I can't / don't have access / not possible"* → *"yes you can, here's how"* — that's a high-signal save. Run this sequence before continuing the task:
+
+1. `search_context` for the topic. Inspect `relatedExisting[]` on any subsequent `write_context` too.
+2. **If a related entry exists → edit it in place** (write to the same id; refine the rule, sharpen the reasoning, replace the stale claim). Use `supersedes` only when the replacement is structurally different.
+3. **If nothing related exists → write a new entry.**
+
+Never skip the save to avoid noise. Duplicate accumulation is prevented by step 1, not by being conservative up front. The cost of an extra entry is much smaller than the cost of the user re-correcting the same thing next session.
+
+### Announce on novel saves, stay quiet on edits
+When you create a *new* entry, tell the user in one short line: *"I added that to memory so we won't forget."* Use "we" — memory is the shared scratchpad, not your private notebook. The announcement gives the user a chance to object in the moment ("no, that was a one-off — don't save it") before the entry calcifies.
+
+When you *edit* an existing entry, or refresh a verify/confirmation, stay silent. Narrating every touch becomes chatter and the user stops reading the line. The split — loud on novel, quiet on maintenance — keeps the signal high.
+
 ### When you learn something durable about the user
-Call `write_context`. Pick a sensible id (path-style: `user/identity`, `preferences/communication`, `projects/<name>`). Set the `type` field correctly — it's how future agents know how to treat the entry:
+Once the embarrassment test passes, call `write_context`. Pick a sensible id (path-style: `user/identity`, `preferences/communication`, `projects/<name>`). Set the `type` field correctly — it's how future agents know how to treat the entry:
 
 - `rule` — always-on directive ("never use --no-verify")
 - `preference` — soft preference ("prefers terse responses")
