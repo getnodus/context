@@ -26,7 +26,13 @@ Maintainer cheat sheet for cutting a release of `@getnodus/context`.
    ```sh
    gh release create vX.Y.Z dist/nodus-context-X.Y.Z.mcpb \
      --title "vX.Y.Z" \
-     --notes-from-tag
+     --notes-from-tag \
+     --discussion-category Announcements
    ```
 
 The README points at `releases/latest` for the Claude Desktop bundle, so **every release must attach the `.mcpb`** — otherwise that link 404s for users.
+
+`--discussion-category Announcements` creates a linked discussion in the
+**Announcements** category for each release. The release workflow at
+`.github/workflows/release.yml` already passes the same flag — this manual
+path is the fallback if the workflow is bypassed.

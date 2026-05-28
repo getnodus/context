@@ -35,4 +35,5 @@ jobs:
           gh release create "$GITHUB_REF_NAME" \
             "dist/nodus-context-${version}.mcpb" \
             --title "$GITHUB_REF_NAME" \
-            --generate-notes
+            --generate-notes \
+            --discussion-category Announcements
