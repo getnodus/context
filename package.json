@@ -1,6 +1,6 @@
 {
   "name": "@getnodus/context",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Personal context layer for AI agents. Your memory, portable across every agent you use.",
   "license": "MIT",
   "author": "Nodus (https://github.com/getnodus)",
@@ -57,7 +57,9 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.4",
     "bonjour-service": "^1.4.0",
+    "dotenv": "^8.2.0",
     "gray-matter": "^4.0.3",
+    "node-fetch": "^3.3.2",
     "zod": "^4.0.0"
   },
   "devDependencies": {
