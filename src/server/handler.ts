@@ -262,16 +262,23 @@ const TOO_LARGE = Symbol("request-body-too-large")
 async function readBody(req: IncomingMessage): Promise<string | typeof TOO_LARGE> {
   const chunks: Buffer[] = []
   let total = 0
+  let oversized = false
+  // Once oversized, drain the rest of the body without buffering so the
+  // client finishes its upload and sees our 413 response instead of an
+  // ECONNRESET. Returning early from for-await would close the iterator
+  // and leave a half-uploaded socket behind, which on Node 20/22 hangs
+  // undici's fetch enough to wedge the test runner.
   for await (const chunk of req) {
+    if (oversized) continue
     const buf = typeof chunk === "string" ? Buffer.from(chunk) : chunk
     total += buf.length
     if (total > MAX_REQUEST_BYTES) {
-      // Drain the rest of the request so the client doesn't see a reset
-      // before our response lands. for-await over `req` continues naturally.
-      return TOO_LARGE
+      oversized = true
+      continue
     }
     chunks.push(buf)
   }
+  if (oversized) return TOO_LARGE
   return Buffer.concat(chunks).toString("utf8")
 }
 
