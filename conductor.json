@@ -1,0 +1,7 @@
+{
+  "scripts": {
+    "setup": "git fetch origin --prune && mkdir -p .context/logs && pnpm install --frozen-lockfile",
+    "check": "pnpm typecheck",
+    "archive": "mkdir -p .context/logs; log=\".context/logs/archive-$(date -u +%Y%m%dT%H%M%SZ).txt\"; { echo '# Archive'; date -u; pwd; git status --short --branch; echo; git log --oneline -5; } | tee \"$log\""
+  }
+}
