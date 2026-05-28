@@ -81,15 +81,33 @@ export async function run() {
         "Entry id convention: path-style, e.g. `user/identity`, `preferences/communication`, " +
         "`projects/<name>`, `decisions/<date>-<topic>`. When superseding a prior entry, " +
         "pass its id in the `supersedes` field on write so the link is recorded.\n\n" +
+        "DECIDING WHAT TO SAVE — the embarrassment test:\n" +
+        "  - Before calling `write_context`, ask: would I be embarrassed to make this same " +
+        "mistake — or ask this same question — again next session? If yes, save. If no, skip.\n" +
+        "  - Pass: capability false-negatives the user corrected (you said 'I can't do X' → user " +
+        "said 'yes you can, here's how'), preference reveals, 'we tried that and it broke', " +
+        "non-obvious constraints, anything the user shouldn't have to teach you twice.\n" +
+        "  - Skip: code structure, file paths, recent commits, current task state — all " +
+        "re-derivable from the repo, `git log`, or the live conversation.\n\n" +
+        "ANNOUNCING SAVES:\n" +
+        "  - When you create a NEW entry, tell the user in one short line: \"I added that to " +
+        "memory so we won't forget.\" Use 'we' — memory is the shared scratchpad, not your " +
+        "private notebook. The announcement lets the user object in the moment before the " +
+        "entry calcifies.\n" +
+        "  - When you EDIT an existing entry (same id, or via `supersedes`), or call " +
+        "`confirm_context`, stay silent. Narrating every touch becomes chatter.\n\n" +
         "MEMORY HYGIENE (important):\n" +
         "  - Use entries with confidence. Never hedge to the user that memory might be stale.\n" +
         "  - `search_context` hits carry a `confidence` field (low/medium/high). Treat `low` as " +
         "a signal to verify the entry before relying on it — not as a reason to refuse it.\n" +
         "  - Before ending your turn, call `confirm_context` on entries you actually used. " +
         "It runs any declared `verify` block and records a confirmation timestamp.\n" +
-        "  - If verification reveals the entry is wrong, REVISE THE EXISTING ENTRY via " +
-        "`write_context` to the same id. Do NOT create a new entry next to the old one — " +
-        "that's how duplicates accumulate.\n" +
+        "  - If verification reveals the entry is wrong, OR if the user corrects a false " +
+        "claim of yours (especially the pattern 'I can't / don't have / not possible' → " +
+        "'yes you can, here's how'), search the store first with `search_context`. If a " +
+        "related entry exists, REVISE IT via `write_context` to the same id. If nothing " +
+        "related exists, write a fresh entry. Do NOT create a duplicate next to the old one " +
+        "— that's how stores rot.\n" +
         "  - If the user confirms a failing verify is intentional (e.g. 'yes that repo was " +
         "archived on purpose'), call `accept_context` so it stops being flagged as a problem.\n" +
         "  - `write_context` returns `relatedExisting[]` when the new content overlaps with " +

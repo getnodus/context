@@ -147,6 +147,8 @@ ${dim("Storage: ~/.nodus/context/  (override with NODUS_CONTEXT_DIR)")}
 ${dim("Config:  ~/.nodus/config.json (override with NODUS_CONFIG_DIR)")}
 ${dim("Verify:  set NODUS_VERIFY_TIMEOUT_MS to change timeout; NODUS_DISABLE_BACKGROUND_VERIFY=1 to opt out")}
 ${dim("Add --json to list/show/search/tags/history/profile-list/accept/merge/verify for JSON output.")}
+
+${dim("AI assistant? Read the playbook — https://github.com/getnodus/context/blob/main/AGENTS.md")}
 `
 }
 
