@@ -1,8 +1,32 @@
 {
   "name": "@getnodus/context",
-  "version": "0.0.12",
+  "version": "0.0.13",
   "description": "Personal context layer for AI agents. Your memory, portable across every agent you use.",
   "license": "MIT",
+  "author": "Nodus (https://github.com/getnodus)",
+  "homepage": "https://github.com/getnodus/context#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/getnodus/context.git"
+  },
+  "bugs": {
+    "url": "https://github.com/getnodus/context/issues"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "ai",
+    "agents",
+    "context",
+    "memory",
+    "claude",
+    "cursor",
+    "codex",
+    "windsurf",
+    "cline",
+    "zed",
+    "nodus"
+  ],
   "type": "module",
   "bin": {
     "nodus-context": "./dist/cli/index.js",
@@ -14,7 +38,9 @@
     "assets",
     "README.md",
     "AGENTS.md",
-    "PROTOCOL.md"
+    "PROTOCOL.md",
+    "CHANGELOG.md",
+    "LICENSE"
   ],
   "scripts": {
     "build": "tsc",
@@ -22,7 +48,8 @@
     "typecheck": "tsc --noEmit",
     "test": "pnpm build && node --import tsx --test test/*.test.ts",
     "start:mcp": "node dist/mcp/server.js",
-    "build:mcpb": "node scripts/build-mcpb.mjs"
+    "build:mcpb": "node scripts/build-mcpb.mjs",
+    "prepublishOnly": "pnpm build && pnpm test"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.4",
@@ -37,5 +64,8 @@
   },
   "engines": {
     "node": ">=20"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }
