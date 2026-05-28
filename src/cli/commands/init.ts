@@ -10,7 +10,7 @@ import {
   readMcp,
 } from "../integrations.js"
 import { confirm } from "../prompt.js"
-import { bold, cyan, dim, green, info, red, yellow } from "../output.js"
+import { bold, cyan, dim, green, info, printRestartHint, red, yellow } from "../output.js"
 import { getDefaultLocalDir } from "../../backends/index.js"
 import { runWizard } from "../wizard/index.js"
 
@@ -96,8 +96,7 @@ async function runFreshInstall(opts: InitOptions): Promise<void> {
     await installOne(t, cmd)
   }
 
-  info("")
-  info(dim("Restart your agent(s) to pick up the new MCP server."))
+  printRestartHint()
 }
 
 async function runRepair(opts: InitOptions): Promise<void> {
@@ -163,8 +162,7 @@ async function runRepair(opts: InitOptions): Promise<void> {
     await installOne(t, cmd)
   }
 
-  info("")
-  info(dim("Restart your agent(s) to pick up the repaired command."))
+  printRestartHint()
 }
 
 async function installOne(

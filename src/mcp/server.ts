@@ -1,4 +1,7 @@
 #!/usr/bin/env node
+import { readFileSync } from "node:fs"
+import { fileURLToPath } from "node:url"
+import { dirname, join } from "node:path"
 import { McpServer, ResourceTemplate } from "@modelcontextprotocol/sdk/server/mcp.js"
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod"
@@ -34,7 +37,9 @@ export async function run() {
   const server = new McpServer(
     {
       name: "nodus-context",
+      title: "Nodus Context",
       version: packageVersion(),
+      icons: loadIcons(),
     },
     {
       instructions:
@@ -368,6 +373,42 @@ function jsonResult(data: unknown) {
     content: [
       { type: "text" as const, text: JSON.stringify(data, null, 2) },
     ],
+  }
+}
+
+interface McpIcon {
+  src: string
+  mimeType?: string
+  sizes?: string[]
+}
+
+/**
+ * Load the Nodus avatar as MCP icons. SVG first (scalable, sharpest in
+ * client UIs), PNG as a fallback for clients that don't render SVG.
+ * Encoded as data URIs so clients never need network access to display
+ * the icon. If the asset files are missing (shouldn't happen in a
+ * published build), the server just starts without icons rather than
+ * crashing — icons are cosmetic.
+ */
+function loadIcons(): McpIcon[] | undefined {
+  try {
+    // dist/mcp/server.js → ../../assets/
+    const assetsRoot = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "assets")
+    const svg = readFileSync(join(assetsRoot, "avatar.svg"))
+    const png = readFileSync(join(assetsRoot, "avatar-1024.png"))
+    return [
+      {
+        src: `data:image/svg+xml;base64,${svg.toString("base64")}`,
+        mimeType: "image/svg+xml",
+      },
+      {
+        src: `data:image/png;base64,${png.toString("base64")}`,
+        mimeType: "image/png",
+        sizes: ["1024x1024"],
+      },
+    ]
+  } catch {
+    return undefined
   }
 }
 

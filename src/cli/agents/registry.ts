@@ -240,12 +240,11 @@ async function removeJsonMerge(spec: InstallJsonMerge): Promise<boolean> {
 // shape; `scopeFlags` is the only per-agent variation.
 
 async function readCliMcp(spec: InstallCliMcp): Promise<McpCommand | undefined> {
-  // We don't shell out to `<binary> mcp get` here — its output format is
-  // agent-specific and tends to drift. Both Claude and Codex persist their
-  // server entries in a JSON/TOML config that we can also read by other
-  // means; for the "is it installed?" check the json fallback path
-  // covers Claude. For Codex (TOML) we'd need a TOML reader — for v1 we
-  // simply return undefined and let the user trust `<binary> mcp list`.
+  // Two read paths. We try the cheap JSON fallback first (Claude Code
+  // mirrors its MCP servers into ~/.claude.json) and fall back to spawning
+  // `<binary> mcp get <name> --json` for agents whose source of truth is
+  // a format we can't easily parse (Codex stores in TOML). The spawn is
+  // skipped when the binary isn't on PATH so doctor stays fast.
   if (spec.jsonFallbackPath) {
     const data = await readJsonConfig(expand(spec.jsonFallbackPath))
     const node = navigate(data, ["mcpServers"], false) as
@@ -253,7 +252,34 @@ async function readCliMcp(spec: InstallCliMcp): Promise<McpCommand | undefined> 
       | undefined
     if (node?.[MCP_KEY]) return node[MCP_KEY]
   }
+  if (await commandOnPath(spec.binary)) {
+    const got = await readMcpViaBinary(spec.binary)
+    if (got) return got
+  }
   return undefined
+}
+
+interface CliMcpGetJson {
+  name?: string
+  transport?: { type?: string; command?: string; args?: string[]; env?: Record<string, string> | null }
+}
+
+async function readMcpViaBinary(binary: string): Promise<McpCommand | undefined> {
+  const r = await runQuiet(binary, ["mcp", "get", MCP_KEY, "--json"])
+  if (r.code !== 0) return undefined
+  let parsed: CliMcpGetJson
+  try {
+    parsed = JSON.parse(r.stdout) as CliMcpGetJson
+  } catch {
+    return undefined
+  }
+  const t = parsed.transport
+  if (!t || t.type !== "stdio" || typeof t.command !== "string" || !Array.isArray(t.args)) {
+    return undefined
+  }
+  const cmd: McpCommand = { command: t.command, args: t.args }
+  if (t.env && typeof t.env === "object") cmd.env = t.env
+  return cmd
 }
 
 async function writeCliMcp(

@@ -23,9 +23,11 @@ export async function cmdDoctor(args: DoctorArgs = {}): Promise<void> {
   }
   info(`${dim("profile:")} ${cyan(config.activeProfile)}  ${dim(`(${Object.keys(config.profiles).length} defined)`)}`)
 
+  let backendType: string | undefined
   try {
     const backend = await getBackend()
     const desc = backend.describe()
+    backendType = desc.type
     info(`${dim("backend:")} ${desc.type}  ${dim(desc.label)}`)
     info(`${dim("history:")} ${desc.capabilities.history ? green("yes") : dim("no")}`)
     try {
@@ -40,8 +42,12 @@ export async function cmdDoctor(args: DoctorArgs = {}): Promise<void> {
   }
   info("")
 
-  await renderEmbedderStatus()
-  info("")
+  // For pure-http backends, search is server-side; the local embedder
+  // doesn't apply. Showing "search: substring" here just confuses users.
+  if (backendType !== "http") {
+    await renderEmbedderStatus()
+    info("")
+  }
 
   info(bold("Agent integrations"))
   const targets = await detectTargets()
@@ -144,9 +150,11 @@ async function cmdDoctorJson(): Promise<void> {
   } catch (e) {
     ;(result.issues as string[]).push(`config: ${(e as Error).message}`)
   }
+  let backendType: string | undefined
   try {
     const backend = await getBackend()
     const desc = backend.describe()
+    backendType = desc.type
     result.backend = {
       type: desc.type,
       label: desc.label,
@@ -161,9 +169,12 @@ async function cmdDoctorJson(): Promise<void> {
   } catch (e) {
     ;(result.issues as string[]).push(`backend: ${(e as Error).message}`)
   }
-  // Embedder
+  // Embedder — only relevant when local content is searched on this
+  // machine. Pure-http backends defer to the server.
   const provider = process.env.NODUS_EMBEDDING_PROVIDER
-  if (!provider) {
+  if (backendType === "http") {
+    result.embedder = { applicable: false, reason: "server-side search" }
+  } else if (!provider) {
     result.embedder = { configured: false, mode: "substring" }
   } else {
     try {
