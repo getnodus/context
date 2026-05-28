@@ -30,6 +30,7 @@ import {
 import { loadAcks, recordAcks } from "../health/acks.js"
 import { getActiveProfile } from "../config/index.js"
 import { packageVersion } from "../cli/version.js"
+import { readUpdateInfo, refreshUpdateInfo, manualUpgradeCommand } from "../cli/update-check.js"
 
 const ID_FIELD = z
   .string()
@@ -44,6 +45,11 @@ export async function run() {
   const backend = await createBackend(profile, { backgroundVerify: true })
   await backend.init?.()
   const desc = backend.describe()
+
+  // Refresh the npm-update cache in the background. The brief reads from the
+  // cache only — first session after install may not yet show the notice, but
+  // every subsequent session will. Fire-and-forget; failures are silent.
+  refreshUpdateInfo().catch(() => {})
 
   const envAuthor = process.env.NODUS_CONTEXT_AGENT
 
@@ -641,13 +647,14 @@ async function renderBrief(
   backend: ContextBackend,
   desc: import("../backends/index.js").BackendDescription,
 ): Promise<string> {
-  const [rules, preferences, identity, all, healthRaw, acks] = await Promise.all([
+  const [rules, preferences, identity, all, healthRaw, acks, update] = await Promise.all([
     backend.list({ type: "rule" }),
     backend.list({ type: "preference" }),
     backend.list({ prefix: "user/" }),
     backend.list(),
     computeMemoryHealth(backend),
     loadAcks(backend),
+    readUpdateInfo(),
   ])
   const health = filterForBrief(filterAcked(healthRaw, acks))
 
@@ -661,6 +668,21 @@ async function renderBrief(
     "",
     `_Backend: **${desc.type}** — ${desc.label} · ${all.length} entries${capStr}_`,
   ]
+
+  // Update notice — agents see this at session start. Phrase it as a fact
+  // for the agent to relay, not as an action the agent should take; the
+  // user is the one who runs `npm install -g`. Surfaced once per session;
+  // no ack mechanism because the cache itself bounds noise to ~daily.
+  if (update?.outdated) {
+    lines.push(
+      "",
+      `> **Heads-up for the user:** \`@getnodus/context\` is out of date on this machine ` +
+        `(installed ${update.current}, latest ${update.latest}). Tell the user once and ` +
+        `suggest they run \`context update\` (or \`${manualUpgradeCommand()}\` if they ` +
+        `don't have the CLI on PATH) when convenient. Don't refuse to use the tool — ` +
+        `it still works.`,
+    )
+  }
 
   // Memory health surface — the only place this information is shown
   // automatically. Agents see it before they touch the store.

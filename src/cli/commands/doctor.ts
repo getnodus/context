@@ -4,6 +4,8 @@ import { configPath, getActiveProfile, loadConfig } from "../../config/index.js"
 import { bold, cyan, dim, green, info, yellow, red } from "../output.js"
 import { getDefaultLocalDir, makeEmbedderFromEnv } from "../../backends/index.js"
 import { computeMemoryHealth, renderHealthHeadline, type MemoryHealth } from "../../backends/health.js"
+import { packageVersion } from "../version.js"
+import { refreshUpdateInfo, upgradeCommand } from "../update-check.js"
 
 export interface DoctorArgs {
   json?: boolean
@@ -15,6 +17,20 @@ export async function cmdDoctor(args: DoctorArgs = {}): Promise<void> {
   if (args.json) return cmdDoctorJson()
   info(bold("context"))
   info("")
+
+  // Version line — explicit so users running `doctor` can see at a glance
+  // whether they're up to date. `doctor` is the canonical "what's my setup"
+  // command, so it gets to spend the network budget to refresh the cache.
+  const update = await refreshUpdateInfo()
+  if (!update) {
+    info(`${dim("version:")} ${packageVersion()}`)
+  } else if (update.outdated) {
+    info(
+      `${dim("version:")} ${packageVersion()}  ${yellow(`→ ${update.latest} available`)}  ${dim(`(${upgradeCommand()})`)}`,
+    )
+  } else {
+    info(`${dim("version:")} ${packageVersion()}  ${dim("(latest)")}`)
+  }
 
   info(`${dim("config:")} ${cyan(configPath())}`)
   let config
@@ -159,7 +175,12 @@ async function renderEmbedderStatus(): Promise<void> {
  * a second `doctor --memory --json` round-trip.
  */
 async function cmdDoctorJson(): Promise<void> {
+  const update = await refreshUpdateInfo()
   const result: Record<string, unknown> = {
+    version: packageVersion(),
+    latestVersion: update?.latest ?? null,
+    updateAvailable: update?.outdated ?? false,
+    upgradeCommand: update?.outdated ? upgradeCommand() : null,
     configPath: configPath(),
     profile: undefined,
     backend: undefined,

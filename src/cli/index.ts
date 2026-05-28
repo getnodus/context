@@ -32,8 +32,10 @@ import { cmdAgentsAdd, cmdAgentsList, cmdAgentsRemove } from "./commands/agents.
 import { cmdJoin } from "./commands/join.js"
 import { cmdSetup } from "./commands/setup.js"
 import { cmdCapabilities } from "./commands/capabilities.js"
-import { bold, cyan, dim, fail, info } from "./output.js"
+import { cmdUpdate } from "./commands/update.js"
+import { bold, cyan, dim, fail, info, yellow } from "./output.js"
 import { packageVersion } from "./version.js"
+import { readUpdateInfo, refreshUpdateInfo, upgradeHint } from "./update-check.js"
 
 /**
  * Display the command name as the user actually invoked it. Both `context`
@@ -136,6 +138,8 @@ ${bold("Portability:")}
 ${bold("Other:")}
   path [<id>]                      Print disk path of root or an entry
   mcp                              Run the MCP server on stdio (used by agents)
+  update [--check] [--json]        Update to the latest version. --check just prints
+                                   status; --json gives agents installed/latest/command
   help                             Show this help
   version                          Print the installed version
 
@@ -258,6 +262,9 @@ async function main(argv: string[]): Promise<void> {
     case "-v":
       info(packageVersion())
       return
+    case "update":
+    case "upgrade":
+      return cmdUpdate(parseUpdate(rest))
     default:
       fail(`unknown command: ${cmd}\n\nrun '${bold(`${invokedAs()} help`)}' for usage`)
   }
@@ -652,6 +659,18 @@ function parseSetup(args: string[]) {
   }
 }
 
+function parseUpdate(args: string[]) {
+  const parsed = parseArgs({
+    args,
+    options: {
+      check: { type: "boolean" },
+      json: { type: "boolean" },
+    },
+    allowPositionals: true,
+  })
+  return { check: parsed.values.check, json: parsed.values.json }
+}
+
 function parseCapabilities(args: string[]) {
   const parsed = parseArgs({
     args,
@@ -784,7 +803,53 @@ process.stdout.on("error", (e: NodeJS.ErrnoException) => {
   throw e
 })
 
-main(process.argv.slice(2)).catch((e) => {
-  process.stderr.write(`error: ${e instanceof Error ? e.message : String(e)}\n`)
-  process.exit(1)
-})
+/**
+ * Commands that skip the update banner:
+ *   - `mcp` becomes a long-lived stdio server; banners would corrupt the protocol
+ *     (we surface updates inside the MCP brief instead).
+ *   - `version` is the one place where the version itself is the answer — no banner.
+ *   - `--json`/`-j` looking commands print machine-readable output to stdout; the
+ *     banner goes to stderr so it's safe, but we still skip to keep agent
+ *     transcripts tidy. `doctor` carries the update info inside its JSON.
+ */
+function shouldShowUpdateBanner(argv: string[]): boolean {
+  const cmd = argv[0]
+  if (!cmd) return false
+  if (cmd === "mcp" || cmd === "version" || cmd === "--version" || cmd === "-v") return false
+  // The update command already prints status; a trailing banner is redundant.
+  if (cmd === "update" || cmd === "upgrade") return false
+  if (cmd === "doctor" && argv.includes("--json")) return false
+  return true
+}
+
+async function showUpdateBannerIfNeeded(argv: string[]): Promise<void> {
+  if (!shouldShowUpdateBanner(argv)) return
+  try {
+    const updateInfo = await readUpdateInfo()
+    if (updateInfo?.outdated) {
+      info("")
+      info(yellow(`→ ${upgradeHint(updateInfo)}`))
+    }
+  } catch {
+    // Update check is best-effort; never let it fail a command.
+  }
+}
+
+const argv = process.argv.slice(2)
+
+// Kick off a background refresh of the npm registry cache. Don't await —
+// the cache write happens before process exit (Node waits for the in-flight
+// fetch), so subsequent runs see the latest info. The first run may not have
+// a banner yet; that's the trade-off for not blocking the command.
+if (argv[0] !== "mcp") {
+  refreshUpdateInfo().catch(() => {})
+}
+
+main(argv)
+  .then(() => showUpdateBannerIfNeeded(argv))
+  .catch((e) => {
+    process.stderr.write(`error: ${e instanceof Error ? e.message : String(e)}\n`)
+    // Still try to surface an upgrade hint on failure — sometimes the failure
+    // is the very thing a newer version fixes.
+    void showUpdateBannerIfNeeded(argv).finally(() => process.exit(1))
+  })
