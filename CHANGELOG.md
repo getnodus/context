@@ -2,54 +2,67 @@
 
 All notable changes to `@getnodus/context` are documented here. Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## Unreleased
+## 0.1.0 — 2026-05-28
 
-### Added
-- **`context` CLI name.** The primary binary is now `context` (e.g. `context doctor`, `context add user/identity`). `nodus-context`, `nodus-context-mcp`, and `nodus-context-server` remain as backward-compat aliases — every existing install, MCP config, and shell-history command still works. New docs and AI-agent guidance use `context`.
-- **`context accept <id> [--reason="..."]`** — escape hatch for failed verifies that are intentional ("yes, that repo was archived on purpose"). Marks the entry's current state as accepted so it stops appearing as a problem in the brief and `doctor --memory`. Auto-clears if a later verify passes. Reverse with `accept --unaccept`. New `accept_context` MCP tool exposes the same to agents — they're instructed never to accept without explicit user confirmation.
-- **`context merge <from> <into>`** — combine two entries (typical workflow for `doctor --memory` duplicate clusters). Joins bodies, unions tags, links via `supersedes`, deletes `from`. New `merge_context` MCP tool exposes the same.
+A foundation release. Memory now maintains itself — entries declare how to check that they're still true, agents call a confirmation tool before ending a turn, and problems surface in the auto-loaded brief instead of hiding in metadata. The CLI is renamed from `nodus-context` to `context` (the old name still works), local search is BM25 lexical out of the box, and several escape hatches (`accept`, `merge`) make memory hygiene a one-command operation. The minor-version bump reflects the magnitude of the diff since 0.0.12; no breaking changes for existing users.
+
+### Self-maintaining memory
+
+- **Verify blocks.** Entries can declare `verify: { kind: url | repo | path, target: ... }`. The check runs on demand, inline on write (3s budget), and in the background when a stale entry is read. Stamps `verifyStatus` + `verifiedAt` into frontmatter; never deletes the entry.
+- **Confidence on search results.** `search_context` hits carry `confidence: low | medium | high`, derived from verify state + freshness. The contract for agents: `low` means *verify before relying on this*, not *warn the user*. Computed client-side when servers don't supply it, so the signal is uniform across local/http/mirror.
+- **Cross-agent corroboration.** Two or more distinct agents confirming the same entry within 30 days lifts confidence to `high` automatically. The strongest trust signal a memory store has.
+- **`confirm_context` MCP tool / `context verify` CLI.** Re-runs the verify block on demand. The MCP server instructs agents to call this near end-of-turn on entries they cited.
+- **Verify-on-write.** `write_context` runs the verify spec inline when present and returns a `verifyWarning` if it fails — catches "I just saved a reference to a repo that's already archived" at the moment of recording. Server-side equivalent on `PUT /entries/:id` for raw-HTTP clients.
+- **Stale-check on read (background).** When an agent reads an entry whose verify is >7 days old, a re-check fires in the background and writes the result back. Natural agent usage becomes self-maintenance. Off by default for library callers; on in the MCP server. Disable with `NODUS_DISABLE_BACKGROUND_VERIFY=1`.
+
+### Memory health surfaces
+
+- **Brief health section.** `nodus-context://brief` opens with a `## Memory health` block listing failed verifies, never-checked entries, and possible duplicate clusters. Auto-loaded by MCP clients, so problems can't hide.
+- **Healthline urgency split.** Headlines in the brief and `doctor --memory` separate urgent (failed) from informational (never-checked, stale, duplicates) so 12 issues is legible at a glance. Fresh installs (everything created in the last 24h) suppress never-checked from the brief — no onboarding nags.
+- **Failed entries stay visible** in brief content sections with a ⚠ marker. Rules and preferences are load-bearing; a failed URL on a rule doesn't mean the rule no longer applies. Memory health flags the verify failure separately.
+- **`acknowledge_health` MCP tool + ack store.** Each health issue carries a stable `key`. Agents call `acknowledge_health(keys[])` after mentioning issues; acks suppress the issue for 7 days. "Mention once per session" is now enforced.
+- **Ack sync across devices.** HTTP backends expose `GET /acks` / `POST /acks`; mirror backends merge local + remote. An ack on the laptop suppresses the issue on the desktop. Falls back to local-only on older servers.
+- **`context doctor --memory`** — on-demand human-readable audit; `--json` for AI assistants. `doctor --json` (without `--memory`) folds memory health inline so AI agents get profile + agents + store state in one call.
+- **`GET /health` endpoint + `ContextBackend.health()`.** HttpBackend fetches a server-computed audit instead of pulling full entry lists. Mirror delegates to primary. Falls back to client-side computation when the server doesn't implement it.
+
+### Escape hatches
+
+- **`context accept <id> [--reason="..."]`** — silence a failed verify the user has confirmed is intentional ("yes, that repo was archived on purpose"). The entry stays put; it just stops appearing as a problem. Auto-clears if a later verify passes. Reverse with `--unaccept`. `accept_context` MCP tool exposes the same — agents are instructed never to accept without explicit user confirmation.
+- **`context merge <from> <into>`** — combine two entries (the typical workflow after `doctor --memory` flags a duplicate cluster). Joins bodies, unions tags, links via `supersedes`, deletes `from`. `merge_context` MCP tool mirrors this.
+- **Contradiction-aware relatedness.** `write_context` returns `relatedExisting[]` when the new content overlaps with entries at other ids, with a `relation` field (`same-subject` or `similar`) so agents know whether to supersede or accept the duplicate.
+
+### CLI
+
+- **Renamed to `context`.** The primary binary is now `context` (e.g. `context doctor`, `context add user/identity`). `nodus-context`, `nodus-context-mcp`, and `nodus-context-server` remain as backward-compat aliases — every existing install, MCP config, and shell-history command still works. New docs use `context`.
+- **`context update`** — self-update command that detects how you installed (`npm`/`pnpm`/`yarn`/`brew`/`npx`) and runs the right command. `--check` just reports availability without installing; `--json` for scripts.
+- **Update awareness.** Banner on long-running commands, line in `doctor`, brief surface in MCP. Disable with `NODUS_DISABLE_UPDATE_CHECK=1`.
 - **`context verify --failed | --never | --stale`** — targeted re-checks so re-running after an audit doesn't re-verify the whole store. Combine selectors freely. `--force` includes accepted entries.
-- **`context add/edit --verify=kind:target`** — attach a verify block from the CLI without hand-editing YAML frontmatter. `edit --verify=…` alone (no body change) updates the verify block in place; `edit --clear-verify` removes it.
-- **Ack sync across devices.** HTTP backends expose new `GET /acks` / `POST /acks` endpoints; mirror backends merge local + remote. An ack on the user's laptop suppresses the issue on their desktop. Falls back to local-only on older servers (404 is tolerated).
-- **`NODUS_VERIFY_TIMEOUT_MS`** — override the 8s verify timeout. Inline verify-on-write keeps a hard 3s ceiling regardless so writes stay fast.
-- **`NODUS_DISABLE_BACKGROUND_VERIFY=1`** — suppress stale-on-read background verifies (metered/offline use).
-- Memory-health audit included inline in `doctor --json` (`memory` field). One call gives AI agents a full picture of profile + agents + store state; `doctor --memory --json` remains available for the per-entry deep view.
+- **`context add/edit --verify=kind:target`** — attach a verify block without hand-editing YAML frontmatter. `edit --verify=…` alone (no body change) updates the verify block in place; `edit --clear-verify` removes it.
 
-### Changed
-- **Confidence is computed client-side when servers omit it.** HTTP backends now derive `confidence` from the returned entry's verify state when the server doesn't supply the field. The trust signal is uniform across local/http/mirror profiles.
-- **Failed verifies stay visible in brief content sections** with a ⚠ marker instead of being hidden. Rules and preferences are load-bearing; a failed URL doesn't mean the rule no longer applies. Memory health flags the verify failure separately.
-- **Healthline urgency split.** Brief and `doctor --memory` headlines separate urgent (failed) from informational (never-checked, stale, duplicates). On a fresh install (every entry created in the last 24h), never-checked is suppressed from the brief — no nagging during onboarding.
-- **Confirmations are deduped and capped per entry.** Entries store at most one confirmation per (agent, day); the last 12 are retained. Repeated `confirm_context` calls on the same entry no longer bloat frontmatter.
-- **Verify timeout unified.** All verify call sites use a single resolver (env-overrideable, 8s default). Inline verify-on-write opts in to a 3s ceiling via the new `inlineBudgetMs` option, replacing hard-coded `timeoutMs: 3000`.
-- `doctor` prints an inline memory-health summary (clean/urgent/informational) so the user sees the store's state without running `--memory`.
+### Search
 
-### Added
-- **Self-maintaining memory.** Entries can declare a `verify:` block (`url`, `repo`, or `path`) and a new `confirm_context` MCP tool / `nodus-context verify` CLI runs the check and stamps `verifyStatus` + `verifiedAt`. Memory is never aged out — entries stay forever, but their trust signal updates.
-- **Confidence on search results.** `search_context` hits now carry `confidence: low|medium|high`. Low confidence means "verify before relying on this", not "warn the user". Computed from verify status + freshness.
-- **Cross-agent corroboration as a confidence signal.** Two or more *distinct* agents (or `cli` / `user` / `background-verify`) confirming the same entry within 30 days lifts confidence to `high` automatically.
-- **Brief health section.** `nodus-context://brief` now opens with a `## Memory health` block listing failed verifies, never-checked entries, and possible duplicates — the only auto-loaded surface, so problems can no longer hide in metadata. Agents are instructed to mention them once per session and offer to clean up.
-- **Verify-on-write.** `write_context` runs the verify spec inline (3s budget) when present, returns a `verifyWarning` in the response when the check fails. Catches "you just recorded a reference to something that's already broken" at the moment of recording.
-- **Stale-check on read (background).** When an agent reads an entry whose verify is older than 7 days, a re-check fires in the background and writes the result back. Natural agent usage becomes self-maintenance. Enabled in the MCP server; off by default for library callers.
-- **Contradiction-aware relatedness.** `relatedExisting[]` entries now carry a `relation` field (`same-subject` or `similar`) computed from id-prefix + tag overlap. Agents treat `same-subject` as a strong signal to supersede rather than fork.
-- **`nodus-context doctor --memory`** — explicit on-demand audit of the store. Prints failed verifies, never-checked entries, stale verifies, and possible duplicate clusters. JSON mode for AI assistants.
-- **Server-side verify-on-write.** HTTP server's `PUT /entries/:id` runs verify inline when the request has a verify block but no status. Pure-`http` users (CLI, raw HTTP clients) now get the same write-time check as MCP users.
-- **`GET /health` endpoint + `ContextBackend.health()`** method. HttpBackend uses it to fetch a server-computed audit instead of pulling full entry lists. Mirror delegates to primary. Falls back to client-side computation if the server doesn't implement it.
-- **`acknowledge_health` MCP tool + ack store.** Each health issue carries a stable `key`. Agents are instructed to call `acknowledge_health(keys[])` after mentioning issues; acked keys are suppressed from the brief for 7 days. "Mention once per session" is now enforced, not just convention. Acks stored at `~/.nodus/.cache/health-acks.json`.
-- **Write-time relatedness hint.** `write_context` returns `relatedExisting[]` when the new content overlaps with entries at other ids, nudging agents to revise the existing entry rather than create a duplicate.
-- New `Confirmation` log on entries (last 8 confirmations kept) — tracks who confirmed an entry and how (verify, use, or user reaffirmation).
-- `nodus-context verify <id> | --all` CLI command. Re-checks entries with a verify block; updates frontmatter in place.
-- `LocalBackend.flushBackgroundWork()` for graceful shutdown / deterministic tests.
-- Updated MCP server `instructions` to teach the agent contract: use entries with confidence, call `confirm_context` near end-of-turn, revise existing entries instead of forking duplicates, mention health issues once per session without lecturing.
+- **Local search is now BM25 lexical.** Replaces naive substring. Tolerates word order, supports prefix matching, weighs id/title/tags higher than body, ranks rarer terms higher. No setup, no dependencies, no model download.
+- **Ollama-backed semantic search is now opt-in.** Lexical is the default and what the README recommends. Ollama remains supported via the same env vars for users who want vector search on the local backend.
+- **HTTP/mirror backends delegate search to the server**, so server-side embeddings "just work" for paired users without client config.
 
-### Changed
-- Brief is now bounded: each content section (rules/preferences/identity) is capped at 8 entries, sorted by recency, with a "…and N more" pointer to `list_context`. Keeps the auto-loaded surface token-friendly.
-- Entries with `verifyStatus: "failed"` are hidden from brief content sections — they're surfaced under `## Memory health` instead, so they can't quietly be cited as fact.
+### Protocol
 
-### Changed
-- Local search is now BM25-based lexical search instead of naive substring. Tolerates word order, prefix matches, weighs id/title/tags higher than body, and ranks rare terms above common ones. No setup, no dependencies, no model download.
-- Ollama-backed semantic search is demoted to an optional opt-in. Lexical search is the default and is what the README recommends; Ollama remains supported via the same env vars for users who want vector search on the local backend.
-- HTTP and mirror backends continue to delegate search to the server, so server-side embeddings "just work" for paired users without any client config.
-- HTTP protocol: `PUT /entries/:id` now accepts `verify`, `verifiedAt`, `verifyStatus`, `verifyMessage`, `confirmations` fields. Older servers that ignore unknown fields keep working.
+- **HTTP**: `PUT /entries/:id` accepts `verify`, `verifiedAt`, `verifyStatus`, `verifyMessage`, `confirmations` fields. Server-side verify-on-write when the client sends a verify block without status. `GET /health` and `GET /acks` / `POST /acks` endpoints. Older servers that ignore unknown fields keep working.
+
+### Other
+
+- **Confirmations are deduped and capped per entry.** At most one confirmation per (agent, day); the last 12 are retained. Repeated `confirm_context` calls on the same entry no longer bloat frontmatter.
+- **Verify timeout unified.** All verify call sites use a single resolver. `NODUS_VERIFY_TIMEOUT_MS` overrides the 8s default; inline verify-on-write caps at 3s regardless so writes stay fast.
+- **Bounded brief content sections.** Rules/preferences/identity are capped at 8 entries per section, sorted by recency, with a "…and N more" pointer. Keeps the auto-loaded surface token-friendly.
+- **`LocalBackend.flushBackgroundWork()`** for graceful shutdown and deterministic tests.
+- **MCP server `instructions`** rewritten to teach the agent contract: use entries with confidence, call `confirm_context` near end-of-turn, revise existing entries instead of forking duplicates, mention health issues once per session without lecturing.
+
+### Release hygiene
+
+- `prepublishOnly` now runs `build:mcpb` — `npm publish` fails if the Claude Desktop bundle can't build, so the README's `releases/latest/.mcpb` link can't 404.
+- `@anthropic-ai/mcpb` version pinned in `scripts/build-mcpb.mjs` so release output is reproducible.
+- README adds a **Network use** section explicitly enumerating every outbound call the package makes (update check, verify blocks, http/mirror backend) and the env vars that disable each.
+- `context update` recognizes Homebrew formula installs (Cellar paths) and the unknown-fallback now mentions `brew upgrade`.
 
 ## 0.0.13 — 2026-05-27
 
