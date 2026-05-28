@@ -25,6 +25,17 @@ type EntryType =
   | "reference"      // pointer to an external resource
   | string           // custom types are allowed
 
+interface VerifySpec {
+  kind: "url" | "repo" | "path"
+  target: string
+}
+
+interface Confirmation {
+  by: string              // agent or "user"
+  at: string              // ISO 8601
+  method: "verify" | "use" | "user"
+}
+
 interface ContextEntry {
   id: string
   title: string
@@ -39,6 +50,11 @@ interface ContextEntry {
   lastUsedAt?: string     // optional: tracked reads
   author?: string         // agent that last wrote, e.g. "claude-code/1.2.3"
   createdBy?: string      // agent that originally created — preserved across rewrites
+  verify?: VerifySpec     // optional declarative check; see "Self-maintaining memory"
+  verifiedAt?: string     // ISO 8601 — last verify attempt
+  verifyStatus?: "ok" | "failed" | "unknown"
+  verifyMessage?: string  // short reason on failure
+  confirmations?: Confirmation[]  // append-only, last 8 retained
 }
 
 interface ContextEntrySummary {
@@ -53,12 +69,17 @@ interface ContextEntrySummary {
   expires?: string
   useCount?: number
   lastUsedAt?: string
+  verify?: VerifySpec
+  verifiedAt?: string
+  verifyStatus?: "ok" | "failed" | "unknown"
+  verifyMessage?: string
 }
 
 interface SearchHit {
   entry: ContextEntrySummary
   score: number
   snippets: string[]
+  confidence: "low" | "medium" | "high"
 }
 
 interface HistorySnapshot {
@@ -108,7 +129,12 @@ Create or update an entry. Body:
   "tags": ["..."],
   "supersedes": ["older/id"],
   "expires": "2026-12-31T00:00:00Z",
-  "author": "claude-code/1.2.3"
+  "author": "claude-code/1.2.3",
+  "verify": { "kind": "repo", "target": "getnodus/context" },
+  "verifiedAt": "2026-05-27T10:00:00Z",
+  "verifyStatus": "ok",
+  "verifyMessage": "",
+  "confirmations": [{ "by": "claude-code", "at": "2026-05-27T10:00:00Z", "method": "verify" }]
 }
 ```
 
@@ -116,6 +142,7 @@ All fields except `body` are optional. Servers should:
 - preserve `created` across updates and bump `updated`
 - retain the supersedes link
 - if `author` is provided, set it on the entry and set `createdBy` to the same value for a new entry; preserve the existing `createdBy` on rewrites so the original creator is never lost
+- accept `verify`, `verifiedAt`, `verifyStatus`, `verifyMessage`, `confirmations` and round-trip them in `GET /entries/:id`. Older servers that ignore these fields stay compatible — clients that need verification just keep using local-side defaults.
 
 Response: `ContextEntry` representing the saved state.
 
@@ -134,6 +161,8 @@ Search. Query parameters:
 
 Servers MAY implement substring, semantic, hybrid, or any other strategy. Returned `score` should be monotonically meaningful (higher = better) but the scale is implementation-defined.
 
+Each `SearchHit` carries a `confidence` field (`low` | `medium` | `high`). Servers that don't compute confidence can omit it; clients default missing values to `medium`. Servers SHOULD return `low` for entries with `verifyStatus: "failed"` and `high` for entries with a recent passing verify.
+
 Response: `{ "hits": SearchHit[] }`
 
 ### `GET /tags`
@@ -141,6 +170,35 @@ Response: `{ "hits": SearchHit[] }`
 List all tags in use.
 
 Response: `{ "tags": TagCount[] }`
+
+## Server-side verify-on-write
+
+When a `PUT /entries/:id` request includes a `verify` block AND no `verifyStatus`, servers SHOULD run the verify check inline (with a short timeout, ~3s) and stamp the result on the stored entry. This ensures clients that don't run their own verification (raw HTTP, older CLIs, third-party tools) still get the memory-health benefit.
+
+Clients that have already run verify locally SHOULD send `verifyStatus` (and `verifiedAt`) in the request; servers MUST honor a pre-computed status and not re-verify.
+
+## Optional endpoints — health
+
+### `GET /health`
+
+Returns a memory health audit — surfaces what's been silently accumulating. Used by `nodus-context doctor --memory` and the MCP server's `nodus-context://brief` resource so HTTP clients don't have to compute it client-side.
+
+Response shape:
+
+```ts
+interface MemoryHealth {
+  totalEntries: number
+  failedVerifies: Array<ContextEntrySummary & { key: string }>
+  neverVerified: Array<ContextEntrySummary & { key: string }>
+  staleVerifies: Array<ContextEntrySummary & { key: string }>
+  duplicateClusters: Array<{ ids: string[]; overlap: number; key: string }>
+  issueCount: number
+}
+```
+
+Each item carries a stable `key` (e.g. `failed:ref/old`, `dup:user/a|user/b`) that clients use with `acknowledge_health` to suppress repeat mentions.
+
+Servers that don't implement this endpoint should return `404`; clients fall back to computing health from `GET /entries` client-side.
 
 ## Optional endpoints — history
 

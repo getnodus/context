@@ -3,12 +3,15 @@ import { getBackend } from "../context.js"
 import { configPath, getActiveProfile, loadConfig } from "../../config/index.js"
 import { bold, cyan, dim, green, info, yellow, red } from "../output.js"
 import { getDefaultLocalDir, makeEmbedderFromEnv } from "../../backends/index.js"
+import { computeMemoryHealth, renderHealthHeadline } from "../../backends/health.js"
 
 export interface DoctorArgs {
   json?: boolean
+  memory?: boolean
 }
 
 export async function cmdDoctor(args: DoctorArgs = {}): Promise<void> {
+  if (args.memory) return cmdDoctorMemory(args)
   if (args.json) return cmdDoctorJson()
   info(bold("nodus-context"))
   info("")
@@ -232,6 +235,62 @@ async function cmdDoctorJson(): Promise<void> {
   }
   result.agents = agentsOut
   process.stdout.write(JSON.stringify(result, null, 2) + "\n")
+}
+
+/**
+ * `doctor --memory` — explicit audit of the store. Surfaces what's been
+ * accumulating quietly: failed verifies, never-checked entries, near-duplicates.
+ * Read-only; nothing is mutated.
+ */
+async function cmdDoctorMemory(args: DoctorArgs): Promise<void> {
+  const backend = await getBackend()
+  const health = await computeMemoryHealth(backend)
+
+  if (args.json) {
+    process.stdout.write(JSON.stringify(health, null, 2) + "\n")
+    return
+  }
+
+  info(bold("Memory health"))
+  info(`${dim("entries:")} ${health.totalEntries}`)
+  if (health.issueCount === 0) {
+    info(green("no issues — every entry verifies, nothing looks duplicated"))
+    return
+  }
+  info(`${dim("issues:")} ${renderHealthHeadline(health)}`)
+  info("")
+
+  if (health.failedVerifies.length > 0) {
+    info(bold(red(`Failed verifies (${health.failedVerifies.length})`)))
+    for (const e of health.failedVerifies) {
+      info(`  ${cyan(e.id)}  ${dim(e.verifyMessage ?? "verification failed")}`)
+    }
+    info("")
+  }
+  if (health.neverVerified.length > 0) {
+    info(bold(yellow(`Never verified (${health.neverVerified.length})`)))
+    for (const e of health.neverVerified) {
+      const spec = e.verify ? `${e.verify.kind}:${e.verify.target}` : ""
+      info(`  ${cyan(e.id)}  ${dim(spec)}`)
+    }
+    info(dim(`  run: nodus-context verify --all`))
+    info("")
+  }
+  if (health.staleVerifies.length > 0) {
+    info(bold(dim(`Stale verifies (${health.staleVerifies.length})`)))
+    for (const e of health.staleVerifies) {
+      info(`  ${cyan(e.id)}  ${dim(`last verified ${e.verifiedAt?.slice(0, 10)}`)}`)
+    }
+    info("")
+  }
+  if (health.duplicateClusters.length > 0) {
+    info(bold(yellow(`Possible duplicates (${health.duplicateClusters.length})`)))
+    for (const cluster of health.duplicateClusters) {
+      info(`  ${cluster.ids.map((id) => cyan(id)).join(" ↔ ")}  ${dim(`overlap ${cluster.overlap.toFixed(2)}`)}`)
+    }
+    info(dim(`  review and merge with: nodus-context show <id> + nodus-context add <id> --supersedes=<old>`))
+    info("")
+  }
 }
 
 export async function cmdPath(id?: string): Promise<void> {

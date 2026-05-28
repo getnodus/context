@@ -13,8 +13,20 @@ import {
   BackendError,
   createBackend,
   ContextBackend,
+  ContextEntry,
   ContextEntrySummary,
+  Confirmation,
+  VerifySpec,
 } from "../backends/index.js"
+import { runVerify } from "../backends/verify.js"
+import {
+  computeMemoryHealth,
+  filterAcked,
+  isProblemEntry,
+  renderHealthBullets,
+  renderHealthHeadline,
+} from "../backends/health.js"
+import { loadAcks, recordAcks } from "../health/acks.js"
 import { getActiveProfile } from "../config/index.js"
 import { packageVersion } from "../cli/version.js"
 
@@ -28,7 +40,7 @@ const ID_FIELD = z
 
 export async function run() {
   const { profile } = await getActiveProfile()
-  const backend = await createBackend(profile)
+  const backend = await createBackend(profile, { backgroundVerify: true })
   await backend.init?.()
   const desc = backend.describe()
 
@@ -51,10 +63,34 @@ export async function run() {
         "  - read_context — fetch a specific entry by id\n" +
         "  - write_context — save durable facts (use the `type` field: rule, preference, " +
         "fact, decision, gotcha, project-state, reference)\n" +
+        "  - confirm_context — call this before ending your turn on entries you actually cited; " +
+        "it re-verifies them and records a confirmation\n" +
+        "  - acknowledge_health — call this after mentioning brief health issues so they don't " +
+        "reappear next session\n" +
         "  - list_tags — see existing tags before inventing new ones\n\n" +
         "Entry id convention: path-style, e.g. `user/identity`, `preferences/communication`, " +
         "`projects/<name>`, `decisions/<date>-<topic>`. When superseding a prior entry, " +
         "pass its id in the `supersedes` field on write so the link is recorded.\n\n" +
+        "MEMORY HYGIENE (important):\n" +
+        "  - Use entries with confidence. Never hedge to the user that memory might be stale.\n" +
+        "  - `search_context` hits carry a `confidence` field (low/medium/high). Treat `low` as " +
+        "a signal to verify the entry before relying on it — not as a reason to refuse it.\n" +
+        "  - Before ending your turn, call `confirm_context` on entries you actually used. " +
+        "It runs any declared `verify` block and records a confirmation timestamp.\n" +
+        "  - If verification reveals the entry is wrong, REVISE THE EXISTING ENTRY via " +
+        "`write_context` to the same id. Do NOT create a new entry next to the old one — " +
+        "that's how duplicates accumulate.\n" +
+        "  - `write_context` returns `relatedExisting[]` when the new content overlaps with " +
+        "entries at other ids. Each item has a `relation`: `same-subject` (likely a duplicate — " +
+        "strongly prefer overwriting or `supersedes`-linking) or `similar` (sibling concept).\n" +
+        "  - `write_context` runs the entry's `verify` block immediately; if `verifyWarning` is " +
+        "in the response, the thing you just referenced may not exist — surface that to the user " +
+        "and offer to revise.\n" +
+        "  - The brief may include a `## Memory health` section at the top listing failed " +
+        "verifies, never-checked entries, and possible duplicates. Each bullet has a `key`. " +
+        "Mention these to the user ONCE per session, briefly. After mentioning, call " +
+        "`acknowledge_health(keys[])` with the keys you brought up — this is how 'mention once' " +
+        "is enforced. Issues you don't acknowledge will reappear in the next brief.\n\n" +
         "Every entry you write is automatically attributed to your agent (e.g. \"claude-code\", " +
         "\"cursor\"), so other agents can see who wrote what.",
     },
@@ -129,7 +165,9 @@ export async function run() {
         "Create or update a context entry. Use this to save durable facts about the user — identity, " +
         "preferences, ongoing projects, decisions, references to external systems. The body is markdown. " +
         "If an entry exists, it is overwritten and `updated` is bumped; `created` is preserved. " +
-        "Choose ids that group naturally: user/identity, preferences/communication, projects/<name>.",
+        "Choose ids that group naturally: user/identity, preferences/communication, projects/<name>. " +
+        "Response includes `relatedExisting[]` when other entries cover similar ground — prefer " +
+        "revising one of those over creating a duplicate.",
       inputSchema: {
         id: ID_FIELD,
         body: z.string().describe("Markdown body of the entry."),
@@ -149,10 +187,59 @@ export async function run() {
           .string()
           .optional()
           .describe("ISO timestamp after which this entry is stale (filtered from default lists)."),
+        verify: z
+          .object({
+            kind: z.enum(["url", "repo", "path"]),
+            target: z.string().min(1),
+          })
+          .optional()
+          .describe(
+            "Optional reality check. `url` (HTTP 2xx), `repo` (GitHub owner/name, not archived), " +
+              "or `path` (local filesystem exists). Run by `confirm_context`. Use it on entries " +
+              "that reference external things that can rot — repos, dashboards, docs, file paths.",
+          ),
       },
     },
-    async ({ id, body, title, type, tags, supersedes, expires }) => {
+    async ({ id, body, title, type, tags, supersedes, expires, verify }) => {
       try {
+        const related = await findRelatedExisting(backend, id, body, title, tags)
+
+        // Read existing for confirmation-appending. Tolerate not-found (new write).
+        let previousConfirmations: Confirmation[] | undefined
+        try {
+          const existing = await backend.read(id)
+          previousConfirmations = existing.confirmations
+        } catch {
+          // new entry
+        }
+
+        // Run the verify spec inline (short budget) so the agent sees the
+        // outcome in the same response. Catches "you just wrote a memory
+        // pointing at something that already doesn't exist."
+        let verifyOutcome: {
+          verifyStatus?: "ok" | "failed" | "unknown"
+          verifyMessage?: string
+          verifiedAt?: string
+        } = {}
+        if (verify) {
+          try {
+            const result = await runVerify(verify, { timeoutMs: 3000 })
+            verifyOutcome = {
+              verifyStatus: result.status,
+              verifiedAt: new Date().toISOString(),
+              ...(result.message !== undefined ? { verifyMessage: result.message } : {}),
+            }
+          } catch {
+            verifyOutcome = { verifyStatus: "unknown", verifiedAt: new Date().toISOString() }
+          }
+        }
+        const author = resolveAuthor()
+        const newConfirmation: Confirmation | null = verify
+          ? { by: author, at: verifyOutcome.verifiedAt!, method: "verify" }
+          : null
+        const confirmations = newConfirmation
+          ? [...(previousConfirmations ?? []), newConfirmation]
+          : previousConfirmations
         const entry = await backend.write({
           id,
           body,
@@ -161,9 +248,131 @@ export async function run() {
           tags,
           supersedes,
           expires,
-          author: resolveAuthor(),
+          author,
+          verify,
+          ...verifyOutcome,
+          ...(confirmations ? { confirmations } : {}),
         })
-        return jsonResult({ saved: true, entry })
+        return jsonResult({
+          saved: true,
+          entry,
+          ...(related.length > 0 ? { relatedExisting: related } : {}),
+          ...(verify && verifyOutcome.verifyStatus && verifyOutcome.verifyStatus !== "ok"
+            ? {
+                verifyWarning: `verify ${verifyOutcome.verifyStatus}: ${verifyOutcome.verifyMessage ?? "no detail"}`,
+              }
+            : {}),
+        })
+      } catch (e) {
+        return errorResult(e)
+      }
+    },
+  )
+
+  server.registerTool(
+    "confirm_context",
+    {
+      title: "Confirm context entries are still accurate",
+      description:
+        "Call before ending your turn on entries you actually used. For each id: runs the entry's " +
+        "`verify` block if present (HTTP, GitHub repo, or filesystem path) and records a " +
+        "confirmation timestamp. Updates the entry's verifyStatus/verifiedAt/verifyMessage in place. " +
+        "If verification fails, the entry stays in the store but is marked low-confidence; you " +
+        "should immediately revise it via `write_context` to the same id with the corrected body.",
+      inputSchema: {
+        ids: z
+          .array(ID_FIELD)
+          .min(1)
+          .describe("Entry ids you relied on this turn."),
+      },
+    },
+    async ({ ids }) => {
+      const results: Array<{
+        id: string
+        verifyStatus?: "ok" | "failed" | "unknown" | "skipped"
+        verifyMessage?: string
+        confirmedAt: string
+        error?: string
+      }> = []
+      const author = resolveAuthor()
+      const nowIso = new Date().toISOString()
+
+      for (const id of ids) {
+        try {
+          const entry = await backend.read(id)
+          let status: "ok" | "failed" | "unknown" | "skipped"
+          let message: string | undefined
+          if (entry.verify) {
+            const result = await runVerify(entry.verify)
+            status = result.status
+            message = result.message
+          } else {
+            status = "skipped"
+          }
+          const confirmation: Confirmation = {
+            by: author,
+            at: nowIso,
+            method: entry.verify ? "verify" : "use",
+          }
+          const nextConfirmations = [...(entry.confirmations ?? []), confirmation]
+          await backend.write({
+            id,
+            body: entry.body,
+            title: entry.title,
+            type: entry.type,
+            tags: entry.tags,
+            supersedes: entry.supersedes,
+            expires: entry.expires,
+            author,
+            verify: entry.verify,
+            ...(entry.verify
+              ? {
+                  verifyStatus: status === "skipped" ? entry.verifyStatus : status,
+                  verifiedAt: status === "skipped" ? entry.verifiedAt : nowIso,
+                  ...(message !== undefined ? { verifyMessage: message } : {}),
+                }
+              : {}),
+            confirmations: nextConfirmations,
+          })
+          results.push({
+            id,
+            verifyStatus: status,
+            ...(message ? { verifyMessage: message } : {}),
+            confirmedAt: nowIso,
+          })
+        } catch (e) {
+          results.push({
+            id,
+            confirmedAt: nowIso,
+            error: e instanceof Error ? e.message : String(e),
+          })
+        }
+      }
+      return jsonResult({ results })
+    },
+  )
+
+  server.registerTool(
+    "acknowledge_health",
+    {
+      title: "Acknowledge memory health issues",
+      description:
+        "Call this after mentioning memory health issues from the brief to the user (e.g. failed " +
+        "verifies, possible duplicates). The acknowledged issues will be suppressed from the brief " +
+        "for 7 days or until they change. Pass the `key` field of each issue you mentioned. " +
+        "Acknowledging is how 'mention once per session, don't lecture' is actually enforced — " +
+        "if you don't acknowledge, the next brief will repeat the same issues.",
+      inputSchema: {
+        keys: z
+          .array(z.string().min(1))
+          .min(1)
+          .describe("Issue keys from the brief's Memory health section (e.g. 'failed:ref/old')."),
+      },
+    },
+    async ({ keys }) => {
+      try {
+        const result = await recordAcks(keys)
+        return jsonResult({ acknowledged: result.added, at: result.at })
       } catch (e) {
         return errorResult(e)
       }
@@ -289,16 +498,21 @@ export async function run() {
   await server.connect(transport)
 }
 
+const BRIEF_SECTION_CAP = 8
+
 async function renderBrief(
   backend: ContextBackend,
   desc: import("../backends/index.js").BackendDescription,
 ): Promise<string> {
-  const [rules, preferences, identity, all] = await Promise.all([
+  const [rules, preferences, identity, all, healthRaw, acks] = await Promise.all([
     backend.list({ type: "rule" }),
     backend.list({ type: "preference" }),
     backend.list({ prefix: "user/" }),
     backend.list(),
+    computeMemoryHealth(backend),
+    loadAcks(),
   ])
+  const health = filterAcked(healthRaw, acks)
 
   const caps: string[] = []
   if (desc.capabilities.history) caps.push("history")
@@ -309,8 +523,25 @@ async function renderBrief(
     "# User context brief",
     "",
     `_Backend: **${desc.type}** — ${desc.label} · ${all.length} entries${capStr}_`,
-    "",
   ]
+
+  // Memory health surface — the only place this information is shown
+  // automatically. Agents see it before they touch the store.
+  const healthBullets = renderHealthBullets(health)
+  if (healthBullets.length > 0) {
+    const headline = renderHealthHeadline(health)
+    lines.push(
+      "",
+      `## Memory health — ${headline}`,
+      "",
+      ...healthBullets,
+      "",
+      "_Mention these to the user once, briefly, and offer to clean up. After mentioning, call " +
+        "`acknowledge_health` with the keys above so they don't reappear in the next brief._",
+    )
+  }
+  lines.push("")
+
   const sections: Array<[string, ContextEntrySummary[]]> = [
     ["Rules (must follow)", rules],
     ["Preferences (respect when possible)", preferences],
@@ -318,20 +549,31 @@ async function renderBrief(
   ]
 
   let any = false
-  for (const [heading, entries] of sections) {
+  for (const [heading, entriesRaw] of sections) {
+    // Hide failed-verify entries from content sections — they're listed in health instead.
+    // Order by recency, then cap so the brief stays token-friendly.
+    const entries = entriesRaw
+      .filter((e) => !isProblemEntry(e))
+      .sort((a, b) => b.updated.localeCompare(a.updated))
     if (entries.length === 0) continue
     any = true
     lines.push(`## ${heading}`, "")
-    for (const e of entries) {
+    const shown = entries.slice(0, BRIEF_SECTION_CAP)
+    for (const e of shown) {
       const tags = e.tags.length > 0 ? `  _[${e.tags.join(", ")}]_` : ""
       const author = e.author ? `  _by ${e.author}_` : ""
       lines.push(`- **${e.id}**${tags}${author}`)
       if (e.preview) lines.push(`  ${e.preview}`)
     }
+    if (entries.length > shown.length) {
+      lines.push(
+        `- _…and ${entries.length - shown.length} more — query with \`list_context\` if you need them_`,
+      )
+    }
     lines.push("")
   }
 
-  if (!any) {
+  if (!any && healthBullets.length === 0) {
     lines.push(
       "_No durable user context recorded yet. As you learn things about the user that should " +
         "persist across sessions, call `write_context` with an appropriate `type`._",
@@ -346,6 +588,63 @@ async function renderBrief(
   return lines.join("\n")
 }
 
+interface RelatedExisting {
+  /** Existing entry that overlaps the new write. */
+  entry: ContextEntrySummary
+  /**
+   * `same-subject` — shares an id-prefix AND a tag with the new entry. Likely a
+   * direct conflict; agent should prefer overwriting/superseding.
+   * `similar` — lexically related but probably a sibling concept.
+   */
+  relation: "same-subject" | "similar"
+}
+
+/**
+ * Looks for existing entries whose content materially overlaps a new write,
+ * so the response can nudge the agent to revise instead of fork. Each hit is
+ * tagged with a `relation` hint based on id-prefix + tag overlap, so the
+ * agent knows when it's likely creating a duplicate vs. just a related fact.
+ */
+async function findRelatedExisting(
+  backend: ContextBackend,
+  newId: string,
+  newBody: string,
+  newTitle: string | undefined,
+  newTags: string[] | undefined,
+): Promise<RelatedExisting[]> {
+  const queryParts: string[] = []
+  if (newTitle) queryParts.push(newTitle)
+  if (newTags && newTags.length > 0) queryParts.push(newTags.join(" "))
+  const firstLine = newBody.split("\n").map((l) => l.trim()).find((l) => l.length > 0)
+  if (firstLine) queryParts.push(firstLine.slice(0, 160))
+  const query = queryParts.join(" ").trim()
+  if (!query) return []
+  try {
+    const hits = await backend.search(query, { limit: 5 })
+    const newPrefix = idPrefix(newId)
+    const newTagSet = new Set(newTags ?? [])
+    return hits
+      .filter((h) => h.entry.id !== newId)
+      .slice(0, 3)
+      .map((h) => {
+        const sameSubject =
+          idPrefix(h.entry.id) === newPrefix &&
+          h.entry.tags.some((t) => newTagSet.has(t))
+        return {
+          entry: h.entry,
+          relation: sameSubject ? ("same-subject" as const) : ("similar" as const),
+        }
+      })
+  } catch {
+    return []
+  }
+}
+
+function idPrefix(id: string): string {
+  const i = id.indexOf("/")
+  return i < 0 ? id : id.slice(0, i)
+}
+
 function renderResourceDescription(e: ContextEntrySummary): string {
   const parts = [e.type]
   if (e.tags.length > 0) parts.push(`tags: ${e.tags.join(", ")}`)
@@ -353,7 +652,7 @@ function renderResourceDescription(e: ContextEntrySummary): string {
   return parts.join(" · ")
 }
 
-function renderEntryMarkdown(entry: import("../backends/index.js").ContextEntry): string {
+function renderEntryMarkdown(entry: ContextEntry): string {
   const meta: string[] = [`type: ${entry.type}`, `updated: ${entry.updated}`]
   if (entry.tags.length > 0) meta.push(`tags: ${entry.tags.join(", ")}`)
   if (entry.author) {
@@ -365,6 +664,14 @@ function renderEntryMarkdown(entry: import("../backends/index.js").ContextEntry)
   }
   if (entry.supersedes && entry.supersedes.length > 0) meta.push(`supersedes: ${entry.supersedes.join(", ")}`)
   if (entry.expires) meta.push(`expires: ${entry.expires}`)
+  if (entry.verify) meta.push(`verify: ${entry.verify.kind}:${entry.verify.target}`)
+  if (entry.verifyStatus) {
+    meta.push(
+      entry.verifiedAt
+        ? `verifyStatus: ${entry.verifyStatus} (${entry.verifiedAt})`
+        : `verifyStatus: ${entry.verifyStatus}`,
+    )
+  }
   return `# ${entry.title}\n\n_${meta.join(" · ")}_\n\n${entry.body}`
 }
 

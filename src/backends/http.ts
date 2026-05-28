@@ -13,6 +13,7 @@ import {
   TagCount,
   WriteInput,
 } from "./types.js"
+import { computeMemoryHealthDirect, type MemoryHealth } from "./health.js"
 
 export interface HttpBackendOptions {
   /** Base URL, e.g. "https://memory.example.com" — no trailing slash. */
@@ -82,6 +83,11 @@ export class HttpBackend implements ContextBackend {
       supersedes: input.supersedes,
       expires: input.expires,
       author: input.author,
+      verify: input.verify,
+      verifiedAt: input.verifiedAt,
+      verifyStatus: input.verifyStatus,
+      verifyMessage: input.verifyMessage,
+      confirmations: input.confirmations,
     })
     return (await this.#json(res)) as ContextEntry
   }
@@ -117,13 +123,38 @@ export class HttpBackend implements ContextBackend {
     if (options.limit) params.set("limit", String(options.limit))
     const res = await this.#req("GET", `/search?${params}`)
     const body = (await this.#json(res)) as { hits?: SearchHit[] } | SearchHit[]
-    return Array.isArray(body) ? body : (body.hits ?? [])
+    const hits = Array.isArray(body) ? body : (body.hits ?? [])
+    // Older servers don't return a confidence field; default to "medium" so
+    // the client surface is uniform regardless of backend.
+    for (const hit of hits) {
+      if (hit.confidence !== "low" && hit.confidence !== "medium" && hit.confidence !== "high") {
+        hit.confidence = "medium"
+      }
+    }
+    return hits
   }
 
   async listTags(): Promise<TagCount[]> {
     const res = await this.#req("GET", "/tags")
     const body = (await this.#json(res)) as { tags?: TagCount[] } | TagCount[]
     return Array.isArray(body) ? body : (body.tags ?? [])
+  }
+
+  async health(options: { now?: number; duplicateScanLimit?: number } = {}): Promise<MemoryHealth> {
+    try {
+      const res = await this.#req("GET", "/health")
+      if (res.status === 404) {
+        // Older server that doesn't implement /health — fall back to
+        // client-side computation over /entries. Slower but correct.
+        return computeMemoryHealthDirect(this, options)
+      }
+      const body = (await this.#json(res)) as MemoryHealth
+      return body
+    } catch (e) {
+      // Server unreachable or returned malformed payload — degrade gracefully.
+      if (e instanceof BackendError) throw e
+      return computeMemoryHealthDirect(this, options)
+    }
   }
 
   async listHistory(id: string): Promise<HistorySnapshot[]> {
