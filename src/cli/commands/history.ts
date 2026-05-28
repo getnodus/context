@@ -26,7 +26,7 @@ export async function cmdHistory(args: { id: string; json?: boolean }): Promise<
     info(`  ${marker}  ${s.timestamp}  ${dim(s.file)}`)
   }
   info("")
-  info(dim(`revert with: nodus-context revert ${args.id} [--at=<file>]`))
+  info(dim(`revert with: context revert ${args.id} [--at=<file>]`))
 }
 
 export async function cmdRevert(args: { id: string; at?: string }): Promise<void> {

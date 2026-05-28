@@ -76,7 +76,12 @@ export class LocalBackend implements ContextBackend {
     this.#embedder =
       options.embedder === undefined ? makeEmbedderFromEnv() : options.embedder
     this.#embeddings = new EmbeddingCache(this.rootDir)
-    this.#backgroundVerify = options.backgroundVerify === true
+    // Background verify can be force-off via env. Useful on metered/offline
+    // connections (planes, tethering) or when privacy means no outbound calls
+    // should fire from a passive read. Caller intent is the default; env
+    // override only ever *disables*, never enables.
+    const envDisabled = process.env.NODUS_DISABLE_BACKGROUND_VERIFY === "1"
+    this.#backgroundVerify = options.backgroundVerify === true && !envDisabled
     this.#verifier = options.verifier ?? ((spec) => runVerify(spec))
   }
 
@@ -161,10 +166,33 @@ export class LocalBackend implements ContextBackend {
     if (verifyStatus) data.verifyStatus = verifyStatus
     const verifyMessage = input.verifyMessage ?? previous?.verifyMessage
     if (verifyMessage) data.verifyMessage = verifyMessage
-    const confirmations = input.confirmations ?? previous?.confirmations
+
+    // verifyAccepted lifecycle:
+    //  - explicit true/false in input wins
+    //  - inherited from previous unless this write produces a passing verify
+    //    (verifyStatus="ok"), in which case there's nothing left to suppress
+    //    so accepted auto-clears
+    let verifyAccepted: boolean | undefined
+    if (input.verifyAccepted !== undefined) {
+      verifyAccepted = input.verifyAccepted
+    } else if (verifyStatus === "ok") {
+      verifyAccepted = false
+    } else {
+      verifyAccepted = previous?.verifyAccepted
+    }
+    if (verifyAccepted) {
+      data.verifyAccepted = true
+      const acceptedAt = input.verifyAcceptedAt ?? previous?.verifyAcceptedAt ?? now
+      data.verifyAcceptedAt = acceptedAt
+      const acceptedReason = input.verifyAcceptedReason ?? previous?.verifyAcceptedReason
+      if (acceptedReason) data.verifyAcceptedReason = acceptedReason
+    }
+
+    const confirmations = dedupAndCapConfirmations(
+      input.confirmations ?? previous?.confirmations,
+    )
     if (confirmations && confirmations.length > 0) {
-      // Keep the most recent 8 to bound frontmatter size.
-      data.confirmations = confirmations.slice(-8)
+      data.confirmations = confirmations
     }
 
     const fileContents = matter.stringify(normalizeBody(input.body), data)
@@ -186,6 +214,9 @@ export class LocalBackend implements ContextBackend {
       verifiedAt: data.verifiedAt as string | undefined,
       verifyStatus: data.verifyStatus as VerifyStatus | undefined,
       verifyMessage: data.verifyMessage as string | undefined,
+      verifyAccepted: data.verifyAccepted as boolean | undefined,
+      verifyAcceptedAt: data.verifyAcceptedAt as string | undefined,
+      verifyAcceptedReason: data.verifyAcceptedReason as string | undefined,
       confirmations: data.confirmations as Confirmation[] | undefined,
     }
   }
@@ -562,8 +593,33 @@ function parseEntry(id: string, parsed: matter.GrayMatterFile<string>): ContextE
     ...(typeof data.verifiedAt === "string" ? { verifiedAt: data.verifiedAt } : {}),
     ...(isVerifyStatus(data.verifyStatus) ? { verifyStatus: data.verifyStatus as VerifyStatus } : {}),
     ...(typeof data.verifyMessage === "string" ? { verifyMessage: data.verifyMessage } : {}),
+    ...(data.verifyAccepted === true ? { verifyAccepted: true } : {}),
+    ...(typeof data.verifyAcceptedAt === "string" ? { verifyAcceptedAt: data.verifyAcceptedAt } : {}),
+    ...(typeof data.verifyAcceptedReason === "string" ? { verifyAcceptedReason: data.verifyAcceptedReason } : {}),
     ...(parseConfirmations(data.confirmations) ? { confirmations: parseConfirmations(data.confirmations)! } : {}),
   }
+}
+
+/**
+ * Dedup confirmations by (agent-without-version, UTC day) so a chatty agent
+ * calling `confirm_context` 50 times on the same entry in a day produces
+ * one record, not fifty. Keep most-recent per bucket, then cap to MAX_KEEP.
+ */
+const MAX_CONFIRMATIONS_KEPT = 12
+function dedupAndCapConfirmations(input?: Confirmation[]): Confirmation[] | undefined {
+  if (!input || input.length === 0) return undefined
+  // Pick the most recent for each (agent, day) bucket.
+  const bucket = new Map<string, Confirmation>()
+  for (const c of input) {
+    if (!c?.by || !c?.at) continue
+    const day = c.at.slice(0, 10) // YYYY-MM-DD
+    const agent = c.by.split("/")[0]
+    const key = `${agent}|${day}`
+    const existing = bucket.get(key)
+    if (!existing || c.at > existing.at) bucket.set(key, c)
+  }
+  const out = Array.from(bucket.values()).sort((a, b) => a.at.localeCompare(b.at))
+  return out.length > MAX_CONFIRMATIONS_KEPT ? out.slice(-MAX_CONFIRMATIONS_KEPT) : out
 }
 
 function parseVerify(value: unknown): VerifySpec | null {
@@ -652,6 +708,9 @@ function summarize(entry: ContextEntry): ContextEntrySummary {
     ...(entry.verifiedAt ? { verifiedAt: entry.verifiedAt } : {}),
     ...(entry.verifyStatus ? { verifyStatus: entry.verifyStatus } : {}),
     ...(entry.verifyMessage ? { verifyMessage: entry.verifyMessage } : {}),
+    ...(entry.verifyAccepted ? { verifyAccepted: true } : {}),
+    ...(entry.verifyAcceptedAt ? { verifyAcceptedAt: entry.verifyAcceptedAt } : {}),
+    ...(entry.verifyAcceptedReason ? { verifyAcceptedReason: entry.verifyAcceptedReason } : {}),
   }
 }
 

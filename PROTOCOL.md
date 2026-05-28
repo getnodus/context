@@ -54,7 +54,10 @@ interface ContextEntry {
   verifiedAt?: string     // ISO 8601 — last verify attempt
   verifyStatus?: "ok" | "failed" | "unknown"
   verifyMessage?: string  // short reason on failure
-  confirmations?: Confirmation[]  // append-only, last 8 retained
+  verifyAccepted?: boolean // user has explicitly accepted the current failed state
+  verifyAcceptedAt?: string // ISO 8601 — when accept was recorded
+  verifyAcceptedReason?: string // optional user-provided reason
+  confirmations?: Confirmation[]  // append-only, deduped per (agent,day); last 12 retained
 }
 
 interface ContextEntrySummary {
@@ -73,6 +76,9 @@ interface ContextEntrySummary {
   verifiedAt?: string
   verifyStatus?: "ok" | "failed" | "unknown"
   verifyMessage?: string
+  verifyAccepted?: boolean
+  verifyAcceptedAt?: string
+  verifyAcceptedReason?: string
 }
 
 interface SearchHit {
@@ -134,6 +140,9 @@ Create or update an entry. Body:
   "verifiedAt": "2026-05-27T10:00:00Z",
   "verifyStatus": "ok",
   "verifyMessage": "",
+  "verifyAccepted": false,
+  "verifyAcceptedAt": null,
+  "verifyAcceptedReason": null,
   "confirmations": [{ "by": "claude-code", "at": "2026-05-27T10:00:00Z", "method": "verify" }]
 }
 ```
@@ -142,7 +151,8 @@ All fields except `body` are optional. Servers should:
 - preserve `created` across updates and bump `updated`
 - retain the supersedes link
 - if `author` is provided, set it on the entry and set `createdBy` to the same value for a new entry; preserve the existing `createdBy` on rewrites so the original creator is never lost
-- accept `verify`, `verifiedAt`, `verifyStatus`, `verifyMessage`, `confirmations` and round-trip them in `GET /entries/:id`. Older servers that ignore these fields stay compatible — clients that need verification just keep using local-side defaults.
+- accept `verify`, `verifiedAt`, `verifyStatus`, `verifyMessage`, `verifyAccepted`, `verifyAcceptedAt`, `verifyAcceptedReason`, `confirmations` and round-trip them in `GET /entries/:id`. Older servers that ignore these fields stay compatible — clients that need verification just keep using local-side defaults.
+- when `verifyStatus` transitions to `ok` on a write, clear `verifyAccepted` (a passing verify has nothing left to suppress).
 
 Response: `ContextEntry` representing the saved state.
 
@@ -161,7 +171,7 @@ Search. Query parameters:
 
 Servers MAY implement substring, semantic, hybrid, or any other strategy. Returned `score` should be monotonically meaningful (higher = better) but the scale is implementation-defined.
 
-Each `SearchHit` carries a `confidence` field (`low` | `medium` | `high`). Servers that don't compute confidence can omit it; clients default missing values to `medium`. Servers SHOULD return `low` for entries with `verifyStatus: "failed"` and `high` for entries with a recent passing verify.
+Each `SearchHit` carries a `confidence` field (`low` | `medium` | `high`). Servers that don't compute confidence can omit it; clients compute it client-side from the returned entry's verify state so the trust signal stays uniform regardless of backend. Servers SHOULD return `low` for entries with `verifyStatus: "failed"` (and not `verifyAccepted`) and `high` for entries with a recent passing verify or ≥2 distinct confirmers in the last 30 days.
 
 Response: `{ "hits": SearchHit[] }`
 
@@ -189,16 +199,43 @@ Response shape:
 interface MemoryHealth {
   totalEntries: number
   failedVerifies: Array<ContextEntrySummary & { key: string }>
+  acceptedVerifies: Array<ContextEntrySummary & { key: string; verifyAcceptedAt?: string; verifyAcceptedReason?: string }>
   neverVerified: Array<ContextEntrySummary & { key: string }>
   staleVerifies: Array<ContextEntrySummary & { key: string }>
   duplicateClusters: Array<{ ids: string[]; overlap: number; key: string }>
   issueCount: number
+  urgency: { urgent: number; informational: number }
+  freshStore: boolean
 }
 ```
 
 Each item carries a stable `key` (e.g. `failed:ref/old`, `dup:user/a|user/b`) that clients use with `acknowledge_health` to suppress repeat mentions.
 
+- `acceptedVerifies` lists failed-verify entries the user has explicitly accepted (via `context accept`). Surfaced separately as informational so the user can see what's been silenced without it counting as an active issue.
+- `urgency.urgent` counts failed-and-not-accepted verifies; `urgency.informational` counts everything else (never-checked, stale, possible duplicates). Use this to communicate severity in summary lines without conflating "needs eyes now" with "routine cleanup."
+- `freshStore` is `true` when every entry was created within the last 24 hours. Clients use this to suppress never-checked nags during onboarding.
+
+Older servers may omit `acceptedVerifies`, `urgency`, or `freshStore`; clients backfill defaults.
+
 Servers that don't implement this endpoint should return `404`; clients fall back to computing health from `GET /entries` client-side.
+
+## Optional endpoints — acks
+
+Acknowledgments record that an agent already mentioned a memory-health issue to the user, so it's suppressed from the brief for 7 days. When a backend supports `/acks`, the suppression syncs across devices — an ack on the user's laptop won't be re-prompted on their desktop.
+
+### `GET /acks`
+
+Returns the current ack map.
+
+Response: `{ "acks": { "failed:ref/old": "2026-05-28T12:00:00Z", … } }`
+
+Servers that don't implement this should return `404`; clients fall back to per-machine local acks at `~/.nodus/.cache/health-acks.json`.
+
+### `POST /acks`
+
+Body: `{ "keys": ["failed:ref/old", "dup:user/a|user/b"] }`
+
+Servers should record each key with the current timestamp, overwriting any prior timestamp for the same key. Response: `{ "added": <int>, "at": "<iso>" }` where `added` counts keys that were not previously present.
 
 ## Optional endpoints — history
 

@@ -1,6 +1,6 @@
 {
   "name": "@getnodus/context",
-  "version": "0.0.13",
+  "version": "0.0.14",
   "description": "Personal context layer for AI agents. Your memory, portable across every agent you use.",
   "license": "MIT",
   "author": "Nodus (https://github.com/getnodus)",
@@ -29,6 +29,9 @@
   ],
   "type": "module",
   "bin": {
+    "context": "./dist/cli/index.js",
+    "context-mcp": "./dist/mcp/server.js",
+    "context-server": "./dist/server/bin.js",
     "nodus-context": "./dist/cli/index.js",
     "nodus-context-mcp": "./dist/mcp/server.js",
     "nodus-context-server": "./dist/server/bin.js"

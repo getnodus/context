@@ -5,6 +5,25 @@ All notable changes to `@getnodus/context` are documented here. Format roughly f
 ## Unreleased
 
 ### Added
+- **`context` CLI name.** The primary binary is now `context` (e.g. `context doctor`, `context add user/identity`). `nodus-context`, `nodus-context-mcp`, and `nodus-context-server` remain as backward-compat aliases — every existing install, MCP config, and shell-history command still works. New docs and AI-agent guidance use `context`.
+- **`context accept <id> [--reason="..."]`** — escape hatch for failed verifies that are intentional ("yes, that repo was archived on purpose"). Marks the entry's current state as accepted so it stops appearing as a problem in the brief and `doctor --memory`. Auto-clears if a later verify passes. Reverse with `accept --unaccept`. New `accept_context` MCP tool exposes the same to agents — they're instructed never to accept without explicit user confirmation.
+- **`context merge <from> <into>`** — combine two entries (typical workflow for `doctor --memory` duplicate clusters). Joins bodies, unions tags, links via `supersedes`, deletes `from`. New `merge_context` MCP tool exposes the same.
+- **`context verify --failed | --never | --stale`** — targeted re-checks so re-running after an audit doesn't re-verify the whole store. Combine selectors freely. `--force` includes accepted entries.
+- **`context add/edit --verify=kind:target`** — attach a verify block from the CLI without hand-editing YAML frontmatter. `edit --verify=…` alone (no body change) updates the verify block in place; `edit --clear-verify` removes it.
+- **Ack sync across devices.** HTTP backends expose new `GET /acks` / `POST /acks` endpoints; mirror backends merge local + remote. An ack on the user's laptop suppresses the issue on their desktop. Falls back to local-only on older servers (404 is tolerated).
+- **`NODUS_VERIFY_TIMEOUT_MS`** — override the 8s verify timeout. Inline verify-on-write keeps a hard 3s ceiling regardless so writes stay fast.
+- **`NODUS_DISABLE_BACKGROUND_VERIFY=1`** — suppress stale-on-read background verifies (metered/offline use).
+- Memory-health audit included inline in `doctor --json` (`memory` field). One call gives AI agents a full picture of profile + agents + store state; `doctor --memory --json` remains available for the per-entry deep view.
+
+### Changed
+- **Confidence is computed client-side when servers omit it.** HTTP backends now derive `confidence` from the returned entry's verify state when the server doesn't supply the field. The trust signal is uniform across local/http/mirror profiles.
+- **Failed verifies stay visible in brief content sections** with a ⚠ marker instead of being hidden. Rules and preferences are load-bearing; a failed URL doesn't mean the rule no longer applies. Memory health flags the verify failure separately.
+- **Healthline urgency split.** Brief and `doctor --memory` headlines separate urgent (failed) from informational (never-checked, stale, duplicates). On a fresh install (every entry created in the last 24h), never-checked is suppressed from the brief — no nagging during onboarding.
+- **Confirmations are deduped and capped per entry.** Entries store at most one confirmation per (agent, day); the last 12 are retained. Repeated `confirm_context` calls on the same entry no longer bloat frontmatter.
+- **Verify timeout unified.** All verify call sites use a single resolver (env-overrideable, 8s default). Inline verify-on-write opts in to a 3s ceiling via the new `inlineBudgetMs` option, replacing hard-coded `timeoutMs: 3000`.
+- `doctor` prints an inline memory-health summary (clean/urgent/informational) so the user sees the store's state without running `--memory`.
+
+### Added
 - **Self-maintaining memory.** Entries can declare a `verify:` block (`url`, `repo`, or `path`) and a new `confirm_context` MCP tool / `nodus-context verify` CLI runs the check and stamps `verifyStatus` + `verifiedAt`. Memory is never aged out — entries stay forever, but their trust signal updates.
 - **Confidence on search results.** `search_context` hits now carry `confidence: low|medium|high`. Low confidence means "verify before relying on this", not "warn the user". Computed from verify status + freshness.
 - **Cross-agent corroboration as a confidence signal.** Two or more *distinct* agents (or `cli` / `user` / `background-verify`) confirming the same entry within 30 days lifts confidence to `high` automatically.

@@ -113,6 +113,9 @@ export class MirrorBackend implements ContextBackend {
         verifiedAt: remote.verifiedAt,
         verifyStatus: remote.verifyStatus,
         verifyMessage: remote.verifyMessage,
+        verifyAccepted: remote.verifyAccepted,
+        verifyAcceptedAt: remote.verifyAcceptedAt,
+        verifyAcceptedReason: remote.verifyAcceptedReason,
         confirmations: remote.confirmations,
       })
     } catch (e) {
@@ -202,6 +205,56 @@ export class MirrorBackend implements ContextBackend {
     return computeMemoryHealthDirect(this.#primary, options)
   }
 
+  async listAcks(): Promise<Record<string, string>> {
+    // Acks from EITHER device count — a user who said "I saw it" on device A
+    // shouldn't be re-prompted on device B. Take the latest timestamp per key
+    // across both. Secondary is the cross-device source of truth; primary
+    // covers device-local acks made while offline.
+    const merged: Record<string, string> = {}
+    const merge = (acks: Record<string, string>) => {
+      for (const [k, v] of Object.entries(acks)) {
+        if (!merged[k] || v > merged[k]) merged[k] = v
+      }
+    }
+    if (this.#primary.listAcks) {
+      try {
+        merge(await this.#primary.listAcks())
+      } catch (e) {
+        this.#onError("listAcks-primary", e as Error)
+      }
+    }
+    if (this.#secondary.listAcks) {
+      try {
+        merge(await this.#secondary.listAcks())
+      } catch (e) {
+        this.#onError("listAcks-secondary", e as Error)
+      }
+    }
+    return merged
+  }
+
+  async recordAcks(keys: string[]): Promise<{ added: number; at: string }> {
+    // Write to both. Primary is authoritative for the return value (it's the
+    // local side and never fails because of network). Secondary failure is
+    // logged but non-fatal so offline acks still work.
+    let result = { added: 0, at: new Date().toISOString() }
+    if (this.#primary.recordAcks) {
+      try {
+        result = await this.#primary.recordAcks(keys)
+      } catch (e) {
+        this.#onError("recordAcks-primary", e as Error)
+      }
+    }
+    if (this.#secondary.recordAcks) {
+      try {
+        await this.#secondary.recordAcks(keys)
+      } catch (e) {
+        this.#onError("recordAcks-secondary", e as Error)
+      }
+    }
+    return result
+  }
+
   async listTags(): Promise<TagCount[]> {
     const counts = new Map<string, number>()
     const accumulate = (tags: TagCount[]) => {
@@ -254,6 +307,9 @@ export class MirrorBackend implements ContextBackend {
         verifiedAt: entry.verifiedAt,
         verifyStatus: entry.verifyStatus,
         verifyMessage: entry.verifyMessage,
+        verifyAccepted: entry.verifyAccepted,
+        verifyAcceptedAt: entry.verifyAcceptedAt,
+        verifyAcceptedReason: entry.verifyAcceptedReason,
         confirmations: entry.confirmations,
       })
     } catch (e) {
