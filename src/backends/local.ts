@@ -5,6 +5,7 @@ import matter from "gray-matter"
 import {
   BackendDescription,
   BodyTooLargeError,
+  Confirmation,
   ContextBackend,
   ContextEntry,
   ContextEntrySummary,
@@ -16,6 +17,8 @@ import {
   SearchHit,
   SearchOptions,
   TagCount,
+  VerifySpec,
+  VerifyStatus,
   WriteInput,
 } from "./types.js"
 import { getDefaultLocalDir, idToPath, pathToId, validateId } from "./paths.js"
@@ -26,6 +29,14 @@ import {
   cosineSimilarity,
   makeEmbedderFromEnv,
 } from "./embeddings.js"
+import { lexicalSearch } from "./lexical.js"
+import { computeConfidence } from "./confidence.js"
+import { runVerify, VerifyResult } from "./verify.js"
+import {
+  computeMemoryHealthDirect,
+  type HealthOptions,
+  type MemoryHealth,
+} from "./health.js"
 
 export interface LocalBackendOptions {
   rootDir?: string
@@ -33,7 +44,17 @@ export interface LocalBackendOptions {
   trackUsage?: boolean
   /** Embedding provider for semantic search. If omitted, reads NODUS_EMBEDDING_PROVIDER env. */
   embedder?: EmbeddingProvider | null
+  /**
+   * When true, reads of entries with a stale `verify:` block schedule a
+   * background re-check that writes the result back. Default false — tests
+   * and library callers opt in explicitly; the MCP server enables it.
+   */
+  backgroundVerify?: boolean
+  /** Override the verify executor (testing). Defaults to {@link runVerify}. */
+  verifier?: (spec: NonNullable<ContextEntry["verify"]>) => Promise<VerifyResult>
 }
+
+const STALE_VERIFY_THRESHOLD_MS = 7 * 24 * 60 * 60 * 1000
 
 export class LocalBackend implements ContextBackend {
   readonly rootDir: string
@@ -41,6 +62,12 @@ export class LocalBackend implements ContextBackend {
   readonly #usage: UsageTracker
   readonly #embedder: EmbeddingProvider | null
   readonly #embeddings: EmbeddingCache
+  readonly #backgroundVerify: boolean
+  readonly #verifier: (
+    spec: NonNullable<ContextEntry["verify"]>,
+  ) => Promise<VerifyResult>
+  readonly #verifyInFlight = new Set<string>()
+  readonly #pendingBackgroundWork = new Set<Promise<unknown>>()
 
   constructor(options: LocalBackendOptions = {}) {
     this.rootDir = options.rootDir ?? getDefaultLocalDir()
@@ -49,6 +76,8 @@ export class LocalBackend implements ContextBackend {
     this.#embedder =
       options.embedder === undefined ? makeEmbedderFromEnv() : options.embedder
     this.#embeddings = new EmbeddingCache(this.rootDir)
+    this.#backgroundVerify = options.backgroundVerify === true
+    this.#verifier = options.verifier ?? ((spec) => runVerify(spec))
   }
 
   describe(): BackendDescription {
@@ -64,6 +93,7 @@ export class LocalBackend implements ContextBackend {
   }
 
   async close(): Promise<void> {
+    await this.flushBackgroundWork()
     await this.#usage.flush()
   }
 
@@ -123,6 +153,20 @@ export class LocalBackend implements ContextBackend {
     if (input.author) data.author = input.author
     if (createdBy) data.createdBy = createdBy
 
+    const verify = input.verify ?? previous?.verify
+    if (verify) data.verify = { kind: verify.kind, target: verify.target }
+    const verifiedAt = input.verifiedAt ?? previous?.verifiedAt
+    if (verifiedAt) data.verifiedAt = verifiedAt
+    const verifyStatus = input.verifyStatus ?? previous?.verifyStatus
+    if (verifyStatus) data.verifyStatus = verifyStatus
+    const verifyMessage = input.verifyMessage ?? previous?.verifyMessage
+    if (verifyMessage) data.verifyMessage = verifyMessage
+    const confirmations = input.confirmations ?? previous?.confirmations
+    if (confirmations && confirmations.length > 0) {
+      // Keep the most recent 8 to bound frontmatter size.
+      data.confirmations = confirmations.slice(-8)
+    }
+
     const fileContents = matter.stringify(normalizeBody(input.body), data)
     await atomicWrite(filePath, fileContents)
 
@@ -138,6 +182,11 @@ export class LocalBackend implements ContextBackend {
       expires: data.expires as string | undefined,
       author: data.author as string | undefined,
       createdBy: data.createdBy as string | undefined,
+      verify: data.verify as VerifySpec | undefined,
+      verifiedAt: data.verifiedAt as string | undefined,
+      verifyStatus: data.verifyStatus as VerifyStatus | undefined,
+      verifyMessage: data.verifyMessage as string | undefined,
+      confirmations: data.confirmations as Confirmation[] | undefined,
     }
   }
 
@@ -159,7 +208,75 @@ export class LocalBackend implements ContextBackend {
         entry.lastUsedAt = rec.lastUsedAt
       }
     }
+    if (this.#backgroundVerify) this.#maybeScheduleStaleVerify(entry)
     return entry
+  }
+
+  /**
+   * Fire-and-forget re-verify for entries whose verify spec is stale. Returns
+   * a promise so tests can await it; callers normally don't.
+   */
+  #maybeScheduleStaleVerify(entry: ContextEntry): Promise<void> | undefined {
+    if (!entry.verify) return
+    if (this.#verifyInFlight.has(entry.id)) return
+    const age = entry.verifiedAt
+      ? Date.now() - Date.parse(entry.verifiedAt)
+      : Number.POSITIVE_INFINITY
+    if (Number.isFinite(age) && age < STALE_VERIFY_THRESHOLD_MS) return
+    this.#verifyInFlight.add(entry.id)
+    const work = this.#runStaleVerify(entry).finally(() => {
+      this.#verifyInFlight.delete(entry.id)
+      this.#pendingBackgroundWork.delete(work)
+    })
+    this.#pendingBackgroundWork.add(work)
+    return work
+  }
+
+  /**
+   * Awaits any in-flight background work (currently: stale-verify rewrites).
+   * Useful for graceful shutdown and deterministic tests.
+   */
+  async flushBackgroundWork(): Promise<void> {
+    while (this.#pendingBackgroundWork.size > 0) {
+      await Promise.allSettled(Array.from(this.#pendingBackgroundWork))
+    }
+  }
+
+  async #runStaleVerify(entry: ContextEntry): Promise<void> {
+    try {
+      const result = await this.#verifier(entry.verify!)
+      // Re-read in case it changed concurrently — never write back stale body.
+      let latest: ContextEntry
+      try {
+        latest = parseEntry(entry.id, await this.#readRaw(idToPath(this.rootDir, entry.id)))
+      } catch {
+        return
+      }
+      await this.write({
+        id: latest.id,
+        body: latest.body,
+        title: latest.title,
+        type: latest.type,
+        tags: latest.tags,
+        supersedes: latest.supersedes,
+        expires: latest.expires,
+        author: latest.author ?? "background-verify",
+        verify: latest.verify,
+        verifyStatus: result.status,
+        verifiedAt: new Date().toISOString(),
+        ...(result.message !== undefined ? { verifyMessage: result.message } : {}),
+        confirmations: [
+          ...(latest.confirmations ?? []),
+          {
+            by: "background-verify",
+            at: new Date().toISOString(),
+            method: "verify",
+          },
+        ],
+      })
+    } catch {
+      // Background work — don't propagate.
+    }
   }
 
   async delete(id: string): Promise<void> {
@@ -240,22 +357,19 @@ export class LocalBackend implements ContextBackend {
     const entries = await this.#scanFull()
     if (entries.length === 0) return []
 
-    const substringHits = this.#substringSearch(query, entries)
+    const lexicalHits = lexicalSearch(query, entries)
+    const limit = options.limit ?? 20
 
-    // If no embedder configured, return substring-only.
     if (!this.#embedder) {
-      return substringHits.slice(0, options.limit ?? 20)
+      return lexicalHits.slice(0, limit)
     }
 
-    // Semantic + substring blend. We embed the query, score each entry by
-    // cosine similarity to its cached embedding (computed lazily), and merge
-    // with substring scores by id.
+    // Embedder configured (opt-in): blend semantic into lexical scores.
     let queryVec: number[]
     try {
       queryVec = await this.#embedder.embed(query)
     } catch {
-      // Embedding service unavailable — fall back gracefully.
-      return substringHits.slice(0, options.limit ?? 20)
+      return lexicalHits.slice(0, limit)
     }
 
     const semanticById = new Map<string, number>()
@@ -267,66 +381,28 @@ export class LocalBackend implements ContextBackend {
     }
 
     const merged = new Map<string, SearchHit>()
-    for (const hit of substringHits) {
-      merged.set(hit.entry.id, { ...hit, score: hit.score })
+    for (const hit of lexicalHits) {
+      merged.set(hit.entry.id, { ...hit })
     }
     for (const [id, sim] of semanticById.entries()) {
       const entry = entries.find((e) => e.id === id)!
-      const semScore = sim * 20 // scale into a comparable range
+      const semScore = sim * 5 // comparable to a typical BM25 single-term hit
       const existing = merged.get(id)
       if (existing) {
         existing.score += semScore
       } else {
-        merged.set(id, { entry: summarize(entry), score: semScore, snippets: [] })
+        merged.set(id, {
+          entry: summarize(entry),
+          score: semScore,
+          snippets: [],
+          confidence: computeConfidence(entry),
+        })
       }
     }
 
     const hits = Array.from(merged.values())
     hits.sort((a, b) => b.score - a.score)
-    return hits.slice(0, options.limit ?? 20)
-  }
-
-  #substringSearch(query: string, entries: ContextEntry[]): SearchHit[] {
-    const terms = query.toLowerCase().split(/\s+/).filter((t) => t.length > 0)
-    if (terms.length === 0) return []
-    const hits: SearchHit[] = []
-
-    for (const entry of entries) {
-      const haystack = `${entry.id}\n${entry.title}\n${entry.tags.join(" ")}\n${entry.body}`.toLowerCase()
-      let score = 0
-      const snippets: string[] = []
-
-      for (const term of terms) {
-        let idx = -1
-        let count = 0
-        while ((idx = haystack.indexOf(term, idx + 1)) !== -1) count++
-        if (count === 0) {
-          score = 0
-          break
-        }
-        score += count
-        const bodyLower = entry.body.toLowerCase()
-        const at = bodyLower.indexOf(term)
-        if (at >= 0) {
-          const start = Math.max(0, at - 40)
-          const end = Math.min(entry.body.length, at + term.length + 80)
-          snippets.push(snippet(entry.body, start, end))
-        }
-      }
-
-      if (score > 0) {
-        const idLower = entry.id.toLowerCase()
-        const titleLower = entry.title.toLowerCase()
-        for (const term of terms) {
-          if (idLower.includes(term)) score += 5
-          if (titleLower.includes(term)) score += 3
-        }
-        hits.push({ entry: summarize(entry), score, snippets: snippets.slice(0, 3) })
-      }
-    }
-
-    hits.sort((a, b) => b.score - a.score)
-    return hits
+    return hits.slice(0, limit)
   }
 
   async #vectorFor(entry: ContextEntry): Promise<number[] | null> {
@@ -344,6 +420,10 @@ export class LocalBackend implements ContextBackend {
     } catch {
       return null
     }
+  }
+
+  async health(options: HealthOptions = {}): Promise<MemoryHealth> {
+    return computeMemoryHealthDirect(this, options)
   }
 
   async listTags(): Promise<TagCount[]> {
@@ -478,7 +558,41 @@ function parseEntry(id: string, parsed: matter.GrayMatterFile<string>): ContextE
     ...(typeof data.expires === "string" ? { expires: data.expires } : {}),
     ...(typeof data.author === "string" ? { author: data.author } : {}),
     ...(typeof data.createdBy === "string" ? { createdBy: data.createdBy } : {}),
+    ...(parseVerify(data.verify) ? { verify: parseVerify(data.verify)! } : {}),
+    ...(typeof data.verifiedAt === "string" ? { verifiedAt: data.verifiedAt } : {}),
+    ...(isVerifyStatus(data.verifyStatus) ? { verifyStatus: data.verifyStatus as VerifyStatus } : {}),
+    ...(typeof data.verifyMessage === "string" ? { verifyMessage: data.verifyMessage } : {}),
+    ...(parseConfirmations(data.confirmations) ? { confirmations: parseConfirmations(data.confirmations)! } : {}),
   }
+}
+
+function parseVerify(value: unknown): VerifySpec | null {
+  if (!value || typeof value !== "object") return null
+  const v = value as Record<string, unknown>
+  if (typeof v.kind !== "string" || typeof v.target !== "string") return null
+  if (v.kind !== "url" && v.kind !== "repo" && v.kind !== "path") return null
+  return { kind: v.kind, target: v.target }
+}
+
+function isVerifyStatus(v: unknown): v is VerifyStatus {
+  return v === "ok" || v === "failed" || v === "unknown"
+}
+
+function parseConfirmations(value: unknown): Confirmation[] | null {
+  if (!Array.isArray(value)) return null
+  const out: Confirmation[] = []
+  for (const raw of value) {
+    if (!raw || typeof raw !== "object") continue
+    const r = raw as Record<string, unknown>
+    if (
+      typeof r.by === "string" &&
+      typeof r.at === "string" &&
+      (r.method === "verify" || r.method === "use" || r.method === "user")
+    ) {
+      out.push({ by: r.by, at: r.at, method: r.method })
+    }
+  }
+  return out.length > 0 ? out : null
 }
 
 function parseSnapshotName(name: string): Omit<HistorySnapshot, "id"> | null {
@@ -534,6 +648,10 @@ function summarize(entry: ContextEntry): ContextEntrySummary {
     ...(entry.expires ? { expires: entry.expires } : {}),
     ...(entry.author ? { author: entry.author } : {}),
     ...(entry.createdBy ? { createdBy: entry.createdBy } : {}),
+    ...(entry.verify ? { verify: entry.verify } : {}),
+    ...(entry.verifiedAt ? { verifiedAt: entry.verifiedAt } : {}),
+    ...(entry.verifyStatus ? { verifyStatus: entry.verifyStatus } : {}),
+    ...(entry.verifyMessage ? { verifyMessage: entry.verifyMessage } : {}),
   }
 }
 
@@ -549,11 +667,4 @@ function dedupeTags(tags: string[]): string[] {
 function normalizeBody(body: string): string {
   const trimmed = body.replace(/\s+$/g, "")
   return trimmed.length > 0 ? trimmed + "\n" : ""
-}
-
-function snippet(body: string, start: number, end: number): string {
-  const text = body.slice(start, end).replace(/\s+/g, " ").trim()
-  const prefix = start > 0 ? "..." : ""
-  const suffix = end < body.length ? "..." : ""
-  return prefix + text + suffix
 }

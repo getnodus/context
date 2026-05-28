@@ -23,6 +23,41 @@ export const ENTRY_TYPES = [
 
 export type EntryType = (typeof ENTRY_TYPES)[number] | (string & {})
 
+/**
+ * Declarative check that proves an entry still reflects reality.
+ *
+ * Kinds:
+ *  - `url`  — HTTP GET; ok on 2xx.
+ *  - `repo` — GitHub repo by `owner/name`; ok if reachable AND not archived.
+ *  - `path` — local filesystem path; ok if it exists.
+ *
+ * `command` is intentionally absent; running arbitrary shell from frontmatter
+ * is a footgun. May be added behind explicit opt-in later.
+ */
+export interface VerifySpec {
+  kind: "url" | "repo" | "path"
+  target: string
+}
+
+export type VerifyStatus = "ok" | "failed" | "unknown"
+
+export interface Confirmation {
+  /** Agent or user that confirmed the entry. */
+  by: string
+  /** ISO timestamp. */
+  at: string
+  /**
+   * How the entry was confirmed:
+   *  - `verify` — automated verify spec passed
+   *  - `use`    — agent cited the entry in a session and the user did not correct
+   *  - `user`   — user explicitly reaffirmed
+   */
+  method: "verify" | "use" | "user"
+}
+
+/** Coarse trust signal exposed in search results. */
+export type Confidence = "low" | "medium" | "high"
+
 export interface ContextEntry {
   /** Path-style identifier, e.g. "user/identity" or "projects/nodus". */
   id: string
@@ -54,6 +89,16 @@ export interface ContextEntry {
   author?: string
   /** Agent that originally created this entry. Preserved across overwrites. */
   createdBy?: string
+  /** Declarative reality check; run by `confirm_context` / `nodus-context verify`. */
+  verify?: VerifySpec
+  /** ISO timestamp of the most recent verification attempt. */
+  verifiedAt?: string
+  /** Outcome of the most recent verification. */
+  verifyStatus?: VerifyStatus
+  /** Short human-readable reason when verifyStatus is "failed". */
+  verifyMessage?: string
+  /** Append-only log of confirmations (verify success, user reaffirmation, agent citation). Last 8 kept. */
+  confirmations?: Confirmation[]
 }
 
 export interface ContextEntrySummary {
@@ -71,6 +116,10 @@ export interface ContextEntrySummary {
   lastUsedAt?: string
   author?: string
   createdBy?: string
+  verify?: VerifySpec
+  verifiedAt?: string
+  verifyStatus?: VerifyStatus
+  verifyMessage?: string
 }
 
 export interface SearchOptions {
@@ -81,6 +130,12 @@ export interface SearchHit {
   entry: ContextEntrySummary
   score: number
   snippets: string[]
+  /**
+   * Coarse trust signal. Agents should treat `low` as a prompt to verify the
+   * entry (via `confirm_context`) before relying on it — they should not
+   * surface this to the user as uncertainty.
+   */
+  confidence: Confidence
 }
 
 export interface WriteInput {
@@ -96,6 +151,14 @@ export interface WriteInput {
    * resulting entry. Examples: "claude-code", "cursor", "codex", "cli".
    */
   author?: string
+  /** Declarative reality check; see VerifySpec. */
+  verify?: VerifySpec
+  /** Verification outcome (set by `confirm_context`, rarely by hand). */
+  verifiedAt?: string
+  verifyStatus?: VerifyStatus
+  verifyMessage?: string
+  /** Append-only confirmation log; replaces previous when present. */
+  confirmations?: Confirmation[]
 }
 
 export interface ListOptions {
@@ -168,6 +231,29 @@ export interface ContextBackend {
   listHistory?(id: string): Promise<HistorySnapshot[]>
   readSnapshot?(id: string, snapshotName: string): Promise<ContextEntry>
   revert?(id: string, snapshotName?: string, author?: string): Promise<ContextEntry>
+
+  /**
+   * Optional. When implemented, callers (the MCP brief, `doctor --memory`)
+   * use this instead of computing health client-side. HTTP backends
+   * implement this by calling `GET /health` on the server — avoids
+   * transferring full entry lists across the network just to compute a
+   * summary. Local backends compute it directly.
+   */
+  health?(options?: { now?: number; duplicateScanLimit?: number }): Promise<import("./types.js").MemoryHealthShape>
+}
+
+/**
+ * Mirrors the `MemoryHealth` shape defined in `./health.js`. Kept as a
+ * forward declaration here so the backend interface doesn't pull the
+ * health module into the dependency graph.
+ */
+export interface MemoryHealthShape {
+  totalEntries: number
+  failedVerifies: Array<ContextEntrySummary & { key: string }>
+  neverVerified: Array<ContextEntrySummary & { key: string }>
+  staleVerifies: Array<ContextEntrySummary & { key: string }>
+  duplicateClusters: Array<{ ids: string[]; overlap: number; key: string }>
+  issueCount: number
 }
 
 export class ContextNotFoundError extends Error {

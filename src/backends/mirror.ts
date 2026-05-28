@@ -12,6 +12,7 @@ import {
   TagCount,
   WriteInput,
 } from "./types.js"
+import { computeMemoryHealthDirect, type MemoryHealth, type HealthOptions } from "./health.js"
 
 export interface MirrorBackendOptions {
   /** Backend used for reads (fast / local-first). Required. */
@@ -108,6 +109,11 @@ export class MirrorBackend implements ContextBackend {
         supersedes: remote.supersedes,
         expires: remote.expires,
         author: remote.author,
+        verify: remote.verify,
+        verifiedAt: remote.verifiedAt,
+        verifyStatus: remote.verifyStatus,
+        verifyMessage: remote.verifyMessage,
+        confirmations: remote.confirmations,
       })
     } catch (e) {
       // Cache failure is non-fatal; we still return the entry.
@@ -189,6 +195,13 @@ export class MirrorBackend implements ContextBackend {
     return merged
   }
 
+  async health(options: HealthOptions = {}): Promise<MemoryHealth> {
+    // Reads come from primary; health follows the same authority. Falls back
+    // to direct computation if the primary doesn't implement health().
+    if (this.#primary.health) return this.#primary.health(options)
+    return computeMemoryHealthDirect(this.#primary, options)
+  }
+
   async listTags(): Promise<TagCount[]> {
     const counts = new Map<string, number>()
     const accumulate = (tags: TagCount[]) => {
@@ -237,6 +250,11 @@ export class MirrorBackend implements ContextBackend {
         supersedes: entry.supersedes,
         expires: entry.expires,
         author: entry.author,
+        verify: entry.verify,
+        verifiedAt: entry.verifiedAt,
+        verifyStatus: entry.verifyStatus,
+        verifyMessage: entry.verifyMessage,
+        confirmations: entry.confirmations,
       })
     } catch (e) {
       this.#onError(`revert ${id}`, e as Error)

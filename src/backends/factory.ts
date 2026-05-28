@@ -31,17 +31,28 @@ export interface ProfileMirror {
 
 export type Profile = ProfileLocal | ProfileHttp | ProfileModule | ProfileMirror
 
-export async function createBackend(profile: Profile): Promise<ContextBackend> {
+export interface CreateBackendOptions {
+  /** Enable stale-on-read background verification (used by the MCP server). */
+  backgroundVerify?: boolean
+}
+
+export async function createBackend(
+  profile: Profile,
+  options: CreateBackendOptions = {},
+): Promise<ContextBackend> {
   switch (profile.type) {
     case "local":
-      return new LocalBackend({ rootDir: profile.rootDir })
+      return new LocalBackend({
+        rootDir: profile.rootDir,
+        backgroundVerify: options.backgroundVerify,
+      })
     case "http":
       return new HttpBackend(profile)
     case "module":
       return loadModuleBackend(profile)
     case "mirror": {
-      const primary = await createBackend(profile.primary)
-      const secondary = await createBackend(profile.secondary)
+      const primary = await createBackend(profile.primary, options)
+      const secondary = await createBackend(profile.secondary, options)
       return new MirrorBackend({ primary, secondary })
     }
     default:
