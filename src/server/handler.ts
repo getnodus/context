@@ -1,7 +1,9 @@
 import type { IncomingMessage, ServerResponse } from "node:http"
 import { timingSafeEqual } from "node:crypto"
-import type { ContextBackend } from "../backends/index.js"
+import type { ContextBackend, VerifySpec, VerifyStatus, Confirmation } from "../backends/index.js"
 import { MAX_BODY_BYTES } from "../backends/index.js"
+import { runVerify } from "../backends/verify.js"
+import { computeMemoryHealth } from "../backends/health.js"
 import { packageVersion } from "../cli/version.js"
 
 // Cap request bodies at 2× MAX_BODY_BYTES so the entry-size limit applies
@@ -159,6 +161,40 @@ export function createHandler(
           return
         }
         const parsed = body ? JSON.parse(body) : {}
+
+        // Server-side verify-on-write. If the request carries a verify spec
+        // but no pre-computed verifyStatus, run the check here so clients
+        // that don't run their own (raw HTTP, older CLIs) still get the
+        // memory-health benefit. Existing verifyStatus is honored — the
+        // server doesn't second-guess a client that already verified.
+        let extraVerify: {
+          verifyStatus?: VerifyStatus
+          verifiedAt?: string
+          verifyMessage?: string
+          confirmations?: Confirmation[]
+        } = {}
+        if (parsed.verify && !parsed.verifyStatus) {
+          try {
+            const result = await runVerify(parsed.verify as VerifySpec, { timeoutMs: 3000 })
+            const at = new Date().toISOString()
+            extraVerify = {
+              verifyStatus: result.status,
+              verifiedAt: at,
+              ...(result.message !== undefined ? { verifyMessage: result.message } : {}),
+              confirmations: [
+                ...(parsed.confirmations ?? []),
+                {
+                  by: parsed.author ?? "http-server",
+                  at,
+                  method: "verify" as const,
+                },
+              ],
+            }
+          } catch {
+            extraVerify = { verifyStatus: "unknown", verifiedAt: new Date().toISOString() }
+          }
+        }
+
         const entry = await backend.write({
           id,
           body: parsed.body,
@@ -168,6 +204,11 @@ export function createHandler(
           supersedes: parsed.supersedes,
           expires: parsed.expires,
           author: parsed.author,
+          verify: parsed.verify,
+          verifiedAt: extraVerify.verifiedAt ?? parsed.verifiedAt,
+          verifyStatus: extraVerify.verifyStatus ?? parsed.verifyStatus,
+          verifyMessage: extraVerify.verifyMessage ?? parsed.verifyMessage,
+          confirmations: extraVerify.confirmations ?? parsed.confirmations,
         })
         sendJson(res, 200, entry)
         return
@@ -224,6 +265,13 @@ export function createHandler(
       if (method === "GET" && segments[0] === "tags") {
         const tags = await backend.listTags()
         sendJson(res, 200, { tags })
+        return
+      }
+
+      // GET /health — memory health audit (see PROTOCOL.md)
+      if (method === "GET" && segments[0] === "health") {
+        const health = await computeMemoryHealth(backend)
+        sendJson(res, 200, health)
         return
       }
 

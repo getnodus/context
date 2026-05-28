@@ -15,6 +15,7 @@ import { cmdHistory, cmdRevert, cmdShowSnapshot } from "./commands/history.js"
 import { cmdExport, cmdImport } from "./commands/portable.js"
 import { cmdTags } from "./commands/tags.js"
 import { cmdStale } from "./commands/stale.js"
+import { cmdVerify } from "./commands/verify.js"
 import {
   cmdConfigPath,
   cmdConfigShow,
@@ -46,7 +47,7 @@ ${bold("Setup:")}
   join <pairing-string>            One-shot: paste nodus://… string, configure profile + install MCPs
   uninstall [--yes] [--dry-run] [--only=<id>]
                                    Remove the MCP server from detected agents
-  doctor [--json]                  Show config, backend, integration status
+  doctor [--json] [--memory]       Show config + integration status (--memory: audit failed/never/duplicate)
   capabilities [--json]            Print supported features for AI orientation
 
 ${bold("Agents:")}
@@ -75,10 +76,12 @@ ${bold("Entries:")}
   add <id> [--type=T] [--title=T] [--tag=T] [--supersedes=ID] [--expires=ISO]
                                    Create/update an entry (stdin or $EDITOR)
   edit <id>                        Open an entry in $EDITOR
-  search <query>                   Search (semantic when embedder configured)
+  search <query>                   Search (BM25 lexical; semantic when embedder configured)
   delete <id>                      Delete an entry
   tags                             List all tags in use
   stale [--days=90]                Show stale and expired entries
+  verify <id> | --all              Run an entry's verify block; stamps verifyStatus/verifiedAt
+                                   (use on entries whose 'verify:' declares url/repo/path)
 
 ${bold("History:")}
   history <id>                     List prior versions
@@ -165,6 +168,8 @@ async function main(argv: string[]): Promise<void> {
       return cmdTags(parseTags(rest))
     case "stale":
       return cmdStale(parseStale(rest))
+    case "verify":
+      return cmdVerify(parseVerify(rest))
     case "history":
       return cmdHistory(parseHistory(rest))
     case "revert":
@@ -432,6 +437,22 @@ function parseStale(args: string[]) {
   }
 }
 
+function parseVerify(args: string[]) {
+  const parsed = parseArgs({
+    args,
+    options: {
+      all: { type: "boolean" },
+      json: { type: "boolean" },
+    },
+    allowPositionals: true,
+  })
+  return {
+    id: parsed.positionals[0],
+    all: parsed.values.all,
+    json: parsed.values.json,
+  }
+}
+
 function parseHistory(args: string[]) {
   const parsed = parseArgs({
     args,
@@ -479,10 +500,13 @@ function parseExport(args: string[]) {
 function parseDoctor(args: string[]) {
   const parsed = parseArgs({
     args,
-    options: { json: { type: "boolean" } },
+    options: {
+      json: { type: "boolean" },
+      memory: { type: "boolean" },
+    },
     allowPositionals: true,
   })
-  return { json: parsed.values.json }
+  return { json: parsed.values.json, memory: parsed.values.memory }
 }
 
 function parseSetup(args: string[]) {
