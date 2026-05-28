@@ -27,6 +27,12 @@ After install, restart each agent so it loads the new MCP server:
 - **Claude Desktop / Cursor / Cline / Windsurf / Zed** — quit and relaunch the app.
 - **Claude Code / Codex CLI** — exit the current session and start a new one.
 
+### Install in Claude Desktop with the Nodus icon
+
+Claude Desktop renders a custom server icon only when installed as a Desktop Extension (`.mcpb` bundle). Download `nodus-context-<version>.mcpb` from [the latest GitHub release](https://github.com/getnodus/context/releases/latest) and double-click it. Claude Desktop opens an install dialog showing the Nodus avatar. The server inside still runs via `npx @getnodus/context`, so behavior matches a normal install.
+
+Other clients display the server icon when they ship icon-rendering UI — the MCP server already advertises both SVG and PNG variants via the `serverInfo.icons` field defined in the [MCP 2025-06-18 spec](https://modelcontextprotocol.io/specification/2025-06-18/schema). No client-side config is needed.
+
 ## CLI
 
 ```

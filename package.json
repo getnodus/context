@@ -21,7 +21,8 @@
     "dev": "tsc --watch",
     "typecheck": "tsc --noEmit",
     "test": "pnpm build && node --import tsx --test test/*.test.ts",
-    "start:mcp": "node dist/mcp/server.js"
+    "start:mcp": "node dist/mcp/server.js",
+    "build:mcpb": "node scripts/build-mcpb.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.4",
