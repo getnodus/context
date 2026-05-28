@@ -12,7 +12,7 @@ body:
   - type: textarea
     id: doctor
     attributes:
-      label: Output of `nodus-context doctor --json`
+      label: Output of `context doctor --json`
       description: Paste the JSON. Redact any tokens if present (the field is `backend.token`).
       render: json
     validations:
@@ -21,7 +21,7 @@ body:
     id: version
     attributes:
       label: Version
-      description: Output of `nodus-context --version` (or `nodus-context capabilities --json | jq .version`).
+      description: Output of `context --version` (or `context capabilities --json | jq .version`).
     validations:
       required: true
   - type: input

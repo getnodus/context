@@ -1,0 +1,13 @@
+# Default owner for everything in the repo.
+*                                       @fschrhunt
+
+# Load-bearing files — extra-explicit so review can't be skipped.
+/.github/workflows/release.yml          @fschrhunt
+/.github/workflows/ci.yml               @fschrhunt
+/.github/CODEOWNERS                     @fschrhunt
+/package.json                           @fschrhunt
+/CHANGELOG.md                           @fschrhunt
+/PROTOCOL.md                            @fschrhunt
+/src/backends/                          @fschrhunt
+/src/server/                            @fschrhunt
+/src/mcp/                               @fschrhunt

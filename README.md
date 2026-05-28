@@ -404,6 +404,30 @@ No telemetry. No analytics. Entry contents never leave the local backend unless 
 
 Override location with `NODUS_CONFIG_DIR`. Local storage root: `~/.nodus/context/` or `NODUS_CONTEXT_DIR`.
 
+## Architecture
+
+```
+src/
+├── backends/    ContextBackend interface + local / http / mirror / module impls.
+│                Also: verify, confidence, lexical search, embeddings, paths.
+├── cli/         The `context` binary. Subcommands in commands/; agent registry in agents/.
+├── config/      Read/write ~/.nodus/config.json (profiles, active backend).
+├── health/      Ack store for "stop nagging me about this issue for 7 days".
+├── mcp/         MCP server (server.ts) — what AI agents talk to.
+└── server/      Standalone HTTP server (bin.ts) + handler — the protocol implementation.
+```
+
+The seam most contributions touch is **`ContextBackend`** in `src/backends/types.ts` — same surface used by the CLI, the MCP server, and the HTTP handler. Add a backend → all three pick it up. See [Implementing your own backend](#implementing-your-own-backend) below.
+
+## Project docs
+
+- **[AGENTS.md](./AGENTS.md)** — playbook for AI assistants that set up or use this tool. The MCP server points agents here.
+- **[CONTRIBUTING.md](./CONTRIBUTING.md)** — dev setup, test loop, how to make your first PR.
+- **[PROTOCOL.md](./PROTOCOL.md)** — wire format for the HTTP backend / `context-server`.
+- **[SECURITY.md](./SECURITY.md)** — how to report vulnerabilities, what's in scope.
+- **[RELEASING.md](./RELEASING.md)** — release process (maintainers).
+- **[CHANGELOG.md](./CHANGELOG.md)** — what changed and when.
+
 ## License
 
 MIT

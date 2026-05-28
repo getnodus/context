@@ -12,6 +12,12 @@ on:
         required: true
         type: string
 
+concurrency:
+  # Serialize on the discussion title so two dispatches targeting the same
+  # announcement can't race; distinct titles still run in parallel.
+  group: announce-${{ inputs.title }}
+  cancel-in-progress: false
+
 permissions:
   discussions: write
 
