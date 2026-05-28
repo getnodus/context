@@ -6,6 +6,10 @@ import { bold, cyan, dim, green, info, red, yellow } from "../output.js"
 export interface VerifyArgs {
   id?: string
   all?: boolean
+  failed?: boolean
+  never?: boolean
+  stale?: boolean
+  force?: boolean
   json?: boolean
 }
 
@@ -16,22 +20,51 @@ interface VerifyOutcome {
   verifiedAt: string
 }
 
+const STALE_VERIFY_MS = 30 * 24 * 60 * 60 * 1000
+
+/**
+ * `context verify` — run an entry's verify block.
+ *
+ * Targets (mutually compatible; entries matching any selector are verified):
+ *   <id>      one specific entry
+ *   --all     every entry that has a verify block (legacy behavior)
+ *   --failed  re-check entries currently marked failed (and not accepted)
+ *   --never   check entries that have a verify block but have never run
+ *   --stale   re-check entries verified more than 30 days ago
+ *
+ * Accepted entries (`context accept <id>`) are skipped by `--all`/`--failed`
+ * unless `--force` is set — they've been explicitly silenced by the user.
+ */
 export async function cmdVerify(args: VerifyArgs): Promise<void> {
   const backend = await getBackend()
   const nowIso = new Date().toISOString()
+  const now = Date.parse(nowIso)
 
   let targets: ContextEntry[]
   if (args.id) {
     targets = [await backend.read(args.id)]
-  } else if (args.all) {
+  } else if (args.all || args.failed || args.never || args.stale) {
     const summaries = await backend.list({ includeExpired: false })
     targets = []
     for (const s of summaries) {
       const entry = await backend.read(s.id)
-      if (entry.verify) targets.push(entry)
+      if (!entry.verify) continue
+      if (entry.verifyAccepted && !args.force) continue
+      let include = false
+      if (args.all) include = true
+      if (args.failed && entry.verifyStatus === "failed") include = true
+      if (args.never && !entry.verifiedAt) include = true
+      if (args.stale) {
+        const age = entry.verifiedAt ? now - Date.parse(entry.verifiedAt) : Number.POSITIVE_INFINITY
+        if (entry.verifyStatus === "ok" && Number.isFinite(age) && age > STALE_VERIFY_MS) include = true
+      }
+      if (include) targets.push(entry)
     }
   } else {
-    process.stderr.write("verify: pass <id> or --all\n")
+    process.stderr.write(
+      "verify: pass <id>, --all, --failed, --never, or --stale\n" +
+        "       (combine selectors freely; entries matching any are checked)\n",
+    )
     process.exit(2)
   }
 
@@ -91,7 +124,8 @@ export async function cmdVerify(args: VerifyArgs): Promise<void> {
   if (failed.length > 0) {
     info("")
     info(bold(`${failed.length} entr${failed.length === 1 ? "y" : "ies"} failed verification.`))
-    info(dim("review with: nodus-context show <id>"))
-    info(dim("revise with: nodus-context edit <id>"))
+    info(dim("review with: context show <id>"))
+    info(dim("revise with: context edit <id>"))
+    info(dim("accept (if expected): context accept <id>"))
   }
 }

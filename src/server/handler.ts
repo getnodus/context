@@ -5,6 +5,7 @@ import { MAX_BODY_BYTES } from "../backends/index.js"
 import { runVerify } from "../backends/verify.js"
 import { computeMemoryHealth } from "../backends/health.js"
 import { packageVersion } from "../cli/version.js"
+import { loadServerAcks, recordServerAcks } from "./acks.js"
 
 // Cap request bodies at 2× MAX_BODY_BYTES so the entry-size limit applies
 // after JSON overhead. Anything beyond is rejected with 413 before reaching
@@ -175,7 +176,9 @@ export function createHandler(
         } = {}
         if (parsed.verify && !parsed.verifyStatus) {
           try {
-            const result = await runVerify(parsed.verify as VerifySpec, { timeoutMs: 3000 })
+            // Inline verify keeps the write fast: tighten env-configured
+            // timeout to a 3s ceiling so a slow remote doesn't block the PUT.
+            const result = await runVerify(parsed.verify as VerifySpec, { inlineBudgetMs: 3000 })
             const at = new Date().toISOString()
             extraVerify = {
               verifyStatus: result.status,
@@ -208,6 +211,9 @@ export function createHandler(
           verifiedAt: extraVerify.verifiedAt ?? parsed.verifiedAt,
           verifyStatus: extraVerify.verifyStatus ?? parsed.verifyStatus,
           verifyMessage: extraVerify.verifyMessage ?? parsed.verifyMessage,
+          verifyAccepted: parsed.verifyAccepted,
+          verifyAcceptedAt: parsed.verifyAcceptedAt,
+          verifyAcceptedReason: parsed.verifyAcceptedReason,
           confirmations: extraVerify.confirmations ?? parsed.confirmations,
         })
         sendJson(res, 200, entry)
@@ -272,6 +278,28 @@ export function createHandler(
       if (method === "GET" && segments[0] === "health") {
         const health = await computeMemoryHealth(backend)
         sendJson(res, 200, health)
+        return
+      }
+
+      // GET /acks — cross-device acknowledgment map (see PROTOCOL.md)
+      if (method === "GET" && segments[0] === "acks" && segments.length === 1) {
+        const acks = await loadServerAcks()
+        sendJson(res, 200, { acks })
+        return
+      }
+
+      // POST /acks — record acknowledgments; body { "keys": [...] }
+      if (method === "POST" && segments[0] === "acks" && segments.length === 1) {
+        const body = await readBody(req)
+        if (body === TOO_LARGE) {
+          status = 413
+          sendJson(res, 413, { error: `request body exceeds ${MAX_REQUEST_BYTES} bytes` })
+          return
+        }
+        const parsed = body ? JSON.parse(body) : {}
+        const keys = Array.isArray(parsed?.keys) ? parsed.keys.filter((k: unknown): k is string => typeof k === "string") : []
+        const result = await recordServerAcks(keys)
+        sendJson(res, 200, result)
         return
       }
 

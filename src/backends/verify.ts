@@ -10,8 +10,35 @@ export interface VerifyResult {
 export interface VerifyOptions {
   /** Override fetch implementation (testing). */
   fetch?: typeof fetch
-  /** Per-check timeout in ms. Default 8000. */
+  /**
+   * Per-check timeout in ms. Defaults to `NODUS_VERIFY_TIMEOUT_MS` (env) or
+   * 8000ms. Callers running verify *inline* during a write (where blocking
+   * the response matters) should pass a tighter cap explicitly via
+   * `inlineBudgetMs` rather than overriding this — that way the env override
+   * still applies to background and on-demand verifies, which is what most
+   * users actually want.
+   */
   timeoutMs?: number
+  /**
+   * Cap timeout to at most this many ms (used by inline verify-on-write to
+   * keep the write fast even when env sets a generous global timeout).
+   * Defaults to ignoring the cap.
+   */
+  inlineBudgetMs?: number
+}
+
+/**
+ * Resolve the verify timeout: explicit option > env > default.
+ * Exposed so callers can also use it (e.g. for AbortController setup that
+ * mirrors the verify call).
+ */
+export function defaultVerifyTimeoutMs(): number {
+  const env = process.env.NODUS_VERIFY_TIMEOUT_MS
+  if (env) {
+    const n = parseInt(env, 10)
+    if (Number.isFinite(n) && n > 0) return n
+  }
+  return 8000
 }
 
 /**
@@ -31,7 +58,10 @@ export async function runVerify(
   options: VerifyOptions = {},
 ): Promise<VerifyResult> {
   const fetchImpl = options.fetch ?? fetch
-  const timeoutMs = options.timeoutMs ?? 8000
+  let timeoutMs = options.timeoutMs ?? defaultVerifyTimeoutMs()
+  if (options.inlineBudgetMs && timeoutMs > options.inlineBudgetMs) {
+    timeoutMs = options.inlineBudgetMs
+  }
 
   switch (spec.kind) {
     case "url":

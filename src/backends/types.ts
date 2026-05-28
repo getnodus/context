@@ -39,6 +39,17 @@ export interface VerifySpec {
   target: string
 }
 
+/**
+ * Result of running an entry's `verify` block.
+ *  - `ok`       — the referenced thing exists and looks healthy
+ *  - `failed`   — verify ran and the thing is gone/broken/archived
+ *  - `unknown`  — couldn't decide (network, 5xx, timeout)
+ *
+ * `accepted` is set explicitly by the user via `context accept <id>` —
+ * "yes I know it's failing, that's the point of this entry." Accepted
+ * entries are suppressed from failed-verify health surfaces. A later
+ * successful verify auto-clears the accepted flag (see `verifyAccepted`).
+ */
 export type VerifyStatus = "ok" | "failed" | "unknown"
 
 export interface Confirmation {
@@ -97,7 +108,19 @@ export interface ContextEntry {
   verifyStatus?: VerifyStatus
   /** Short human-readable reason when verifyStatus is "failed". */
   verifyMessage?: string
-  /** Append-only log of confirmations (verify success, user reaffirmation, agent citation). Last 8 kept. */
+  /**
+   * User has explicitly accepted the current verify state — typically used to
+   * silence a known-failing verify ("yes, the repo is archived, that's the
+   * point of this reference"). When true, the entry is excluded from
+   * failed-verify health surfaces. Auto-cleared on the next passing verify
+   * because there's nothing left to suppress.
+   */
+  verifyAccepted?: boolean
+  /** ISO timestamp the user accepted the current verify state. */
+  verifyAcceptedAt?: string
+  /** Optional user-provided reason. Surfaced in `doctor --memory` so the next reader knows why. */
+  verifyAcceptedReason?: string
+  /** Append-only log of confirmations (verify success, user reaffirmation, agent citation). Last 12 kept, deduped per agent/day. */
   confirmations?: Confirmation[]
 }
 
@@ -120,6 +143,9 @@ export interface ContextEntrySummary {
   verifiedAt?: string
   verifyStatus?: VerifyStatus
   verifyMessage?: string
+  verifyAccepted?: boolean
+  verifyAcceptedAt?: string
+  verifyAcceptedReason?: string
 }
 
 export interface SearchOptions {
@@ -157,7 +183,14 @@ export interface WriteInput {
   verifiedAt?: string
   verifyStatus?: VerifyStatus
   verifyMessage?: string
-  /** Append-only confirmation log; replaces previous when present. */
+  /**
+   * User has explicitly accepted the current verify state. Pass `true` from
+   * `context accept`; pass `false` to clear. Omit to preserve the existing value.
+   */
+  verifyAccepted?: boolean
+  verifyAcceptedAt?: string
+  verifyAcceptedReason?: string
+  /** Append-only confirmation log; replaces previous when present. Backend caps and dedups. */
   confirmations?: Confirmation[]
 }
 
@@ -240,6 +273,21 @@ export interface ContextBackend {
    * summary. Local backends compute it directly.
    */
   health?(options?: { now?: number; duplicateScanLimit?: number }): Promise<import("./types.js").MemoryHealthShape>
+
+  /**
+   * Optional. Returns the set of acknowledged health issue keys this backend
+   * knows about. Used by the brief to suppress "mention once" issues across
+   * devices. HTTP backends call `GET /acks`; local backends return an empty
+   * map (acks live in `~/.nodus/<config>/.cache/health-acks.json`, loaded by
+   * the brief renderer alongside this).
+   */
+  listAcks?(): Promise<Record<string, string>>
+
+  /**
+   * Optional. Records acknowledgments to this backend. The values are ISO
+   * timestamps; the brief filters by 7-day TTL on the read side.
+   */
+  recordAcks?(keys: string[]): Promise<{ added: number; at: string }>
 }
 
 /**
@@ -250,10 +298,24 @@ export interface ContextBackend {
 export interface MemoryHealthShape {
   totalEntries: number
   failedVerifies: Array<ContextEntrySummary & { key: string }>
+  /** Failed verifies the user has explicitly accepted via `context accept`. Surfaced separately as informational. */
+  acceptedVerifies: Array<ContextEntrySummary & { key: string; verifyAcceptedAt?: string; verifyAcceptedReason?: string }>
   neverVerified: Array<ContextEntrySummary & { key: string }>
   staleVerifies: Array<ContextEntrySummary & { key: string }>
   duplicateClusters: Array<{ ids: string[]; overlap: number; key: string }>
   issueCount: number
+  /**
+   * Counts split by urgency tier:
+   *  - `urgent`        — needs eyes: failed verifies (not accepted)
+   *  - `informational` — routine cleanup: never-checked, stale, possible duplicates
+   * Useful for headlines that need to communicate severity, not just volume.
+   */
+  urgency: { urgent: number; informational: number }
+  /**
+   * True if every entry was created within the last 24h (fresh install).
+   * The brief uses this to suppress never-checked nags during onboarding.
+   */
+  freshStore: boolean
 }
 
 export class ContextNotFoundError extends Error {

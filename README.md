@@ -9,18 +9,20 @@ The storage is pluggable. By default it's markdown files on your disk; you can a
 ## Quick start
 
 ```sh
-npm i -g @getnodus/context           # adds nodus-context to your $PATH
-nodus-context init                   # interactive wizard: pick backend, install for detected agents
-nodus-context doctor                 # show backend + integration status
+npm i -g @getnodus/context           # adds `context` to your $PATH
+context init                         # interactive wizard: pick backend, install for detected agents
+context doctor                       # show backend + integration status (and memory health)
 ```
 
 `init` is interactive (it asks where context should live and which agents to install for). If you want a non-interactive form — or you're an AI assistant doing this for someone — use `setup` instead and see [AGENTS.md](./AGENTS.md):
 
 ```sh
-nodus-context setup --backend=local --agents=detected --json
+context setup --backend=local --agents=detected --json
 ```
 
-Prefer not to install globally? `npx -p @getnodus/context nodus-context init` works too. The `-p` flag is required because the binary name (`nodus-context`) differs from the package name (`@getnodus/context`).
+The legacy `nodus-context` binary is kept as an alias, so anything in your shell history or CI still works. New scripts should use `context`.
+
+Prefer not to install globally? `npx -p @getnodus/context context init` works too. The `-p` flag is required because the binary name (`context`) differs from the package name (`@getnodus/context`).
 
 After install, restart each agent so it loads the new MCP server:
 
@@ -36,17 +38,18 @@ Other clients display the server icon when they ship icon-rendering UI — the M
 ## CLI
 
 ```
-nodus-context <command>
+context <command>
 
 Setup:
   init                            Interactive setup wizard
   setup --backend=local|server|mirror [--url=<u>] [--token=<t>] [--agents=...]
                                   Non-interactive, AI-friendly setup (see AGENTS.md)
-  join <pairing-string>           Paste a nodus://… string from `nodus-context-server install`
+  join <pairing-string>           Paste a nodus://… string from `context-server install`
                                   to configure profile + install MCPs in one shot
   uninstall [--yes] [--only=<id>] Remove the MCP server from detected agents
-  doctor [--json] [--memory]      Show config + integration status
-                                  (--memory: audit failed verifies / never-checked / duplicates)
+  doctor [--json] [--memory]      Show config + integration status. --json folds in memory
+                                  health so AI agents get the full picture in one call;
+                                  --memory is the human-readable deep audit
   capabilities [--json]           Print supported features (for AI orientation)
 
 Profiles:
@@ -69,13 +72,26 @@ Entries:
                                   List entries
   show <id>                       Print one entry
   add <id> [--type=T] [--tag=T] [--supersedes=ID] [--expires=ISO]
-                                  Create/update (stdin or $EDITOR)
-  edit <id>                       Open in $EDITOR
+          [--verify=kind:target]
+                                  Create/update (stdin or $EDITOR). --verify attaches a
+                                  reality check (url:https://…, repo:owner/name, path:/x)
+  edit <id> [--verify=kind:target] [--clear-verify]
+                                  Open in $EDITOR — or, with --verify alone, attach/replace
+                                  the verify block without opening the editor
   search <query>                  Search (BM25 lexical; semantic when an embedder is configured)
   delete <id>                     Delete an entry
   tags                            List all tags in use
   stale [--days=90]               Find stale and expired entries
-  verify <id> | --all             Re-check entries with a verify: block; updates verifyStatus
+
+Memory hygiene:
+  verify <id>                     Run an entry's verify block once
+  verify --all|--failed|--never|--stale
+                                  Targeted re-checks (combine selectors freely)
+  accept <id> [--reason="..."]    Mark a failed verify as expected — silences it from the
+                                  brief / doctor surfaces. Auto-clears if verify later passes
+  accept --unaccept <id>          Reverse a prior accept
+  merge <from> <into> [--body=…]  Combine two entries (use after `doctor --memory` flags a
+                                  duplicate cluster). Links via supersedes, deletes from
 
 History:
   history <id>                    List prior versions
@@ -93,14 +109,15 @@ Other:
   mcp                             Run MCP server on stdio (used by agents)
 ```
 
-For multi-device setup, run `nodus-context-server install` on a box you own; it emits a pairing string for `nodus-context join` on each client.
+For multi-device setup, run `context-server install` on a box you own; it emits a pairing string for `context join` on each client.
 
 Pipe-friendly:
 
 ```sh
-echo "Prefers terse responses" | nodus-context add preferences/communication --tag preferences
-nodus-context list --json | jq .
-nodus-context search "amsterdam"
+echo "Prefers terse responses" | context add preferences/communication --tag preferences
+context list --json | jq .
+context search "amsterdam"
+context add ref/dashboard --verify=url:https://grafana.example.com/d/api --body="oncall latency board"
 ```
 
 ## Backends
@@ -110,7 +127,7 @@ Storage is selected per profile. The CLI and MCP tools are identical regardless 
 ### `local` — markdown files on disk (default)
 
 ```sh
-nodus-context profile add personal --type=local --use
+context profile add personal --type=local --use
 ```
 
 Files at `~/.nodus/context/<id>.md` with YAML frontmatter. Open them in any editor. Sync them with iCloud, Dropbox, or git. Atomic writes, auto-snapshot history, 256 KB body cap.
@@ -118,7 +135,7 @@ Files at `~/.nodus/context/<id>.md` with YAML frontmatter. Open them in any edit
 ### `http` — remote server
 
 ```sh
-nodus-context profile add server --type=http --url=https://memory.example.com --token=$TOKEN --use
+context profile add server --type=http --url=https://memory.example.com --token=$TOKEN --use
 ```
 
 Speaks the [Nodus Context HTTP Protocol](./PROTOCOL.md). Any server implementing those endpoints can be a backend — a thin wrapper over a Postgres + pgvector brain, a hosted service, anything.
@@ -126,7 +143,7 @@ Speaks the [Nodus Context HTTP Protocol](./PROTOCOL.md). Any server implementing
 ### `module` — custom backend from npm or local file
 
 ```sh
-nodus-context profile add work --type=module --path=@acme/context-backend-s3 --options='{"bucket":"..."}'
+context profile add work --type=module --path=@acme/context-backend-s3 --options='{"bucket":"..."}'
 ```
 
 Loads any module that default-exports (or exports `createBackend`) a factory returning a `ContextBackend`. Use this to bring your own storage without forking.
@@ -134,11 +151,11 @@ Loads any module that default-exports (or exports `createBackend`) a factory ret
 ### Switching
 
 ```sh
-nodus-context use personal      # switch active profile
-nodus-context profile list      # see what's defined
-nodus-context export -o b.json  # snapshot from one backend
-nodus-context use server        # switch
-nodus-context import b.json     # restore into the other
+context use personal      # switch active profile
+context profile list      # see what's defined
+context export -o b.json  # snapshot from one backend
+context use server        # switch
+context import b.json     # restore into the other
 ```
 
 ## Attribution
@@ -156,8 +173,8 @@ Resolution:
 Filter by author:
 
 ```sh
-nodus-context list --author=cursor          # what did Cursor write?
-nodus-context list --author=claude-code     # matches "claude-code" and "claude-code/4.7.0"
+context list --author=cursor          # what did Cursor write?
+context list --author=claude-code     # matches "claude-code" and "claude-code/4.7.0"
 ```
 
 ## Entry types
@@ -192,6 +209,8 @@ Agents see two things:
 - `write_context` — save a new entry or update an existing one (with `type`, `supersedes`, `expires`, `verify`). Response includes `relatedExisting[]` when other entries cover similar ground, nudging agents to revise rather than fork.
 - `search_context` — search across all entries; hits carry a `confidence` signal (low/medium/high) so agents know which entries to verify before relying on them
 - `confirm_context` — agents call this near end-of-turn on entries they actually used; runs any declared `verify:` block and stamps a confirmation
+- `accept_context` — when the user confirms a failing verify is intentional ("yes the repo is archived on purpose"), agents call this to silence it
+- `merge_context` — combine two entries the user agrees are duplicates; preserves a `supersedes` link
 - `acknowledge_health` — agents call this after mentioning brief health issues so they don't reappear next session (enforces "mention once per session, don't lecture")
 - `list_tags` — discover existing tags before inventing new ones
 - `delete_context` — remove an entry
@@ -245,21 +264,38 @@ Supported kinds:
 Run a check manually:
 
 ```sh
-nodus-context verify reference/nodus       # one entry
-nodus-context verify --all                 # every entry with a verify: block
+context verify reference/nodus       # one entry
+context verify --all                 # every entry with a verify: block
+context verify --failed              # only entries currently marked failed
+context verify --never               # entries that have a verify block but never ran
+context verify --stale               # entries verified more than 30 days ago
 ```
 
-Each run stamps `verifiedAt` + `verifyStatus` (`ok` | `failed` | `unknown`) into frontmatter and appends a confirmation record.
+Each run stamps `verifiedAt` + `verifyStatus` (`ok` | `failed` | `unknown`) into frontmatter and appends a confirmation record. Set `NODUS_VERIFY_TIMEOUT_MS` to override the 8-second default (inline verify-on-write keeps a 3-second cap so writes stay fast).
 
 ### Confidence on search
 
 `search_context` returns a `confidence` field on every hit:
 
 - `high` — recently verified and passed
-- `medium` — no signal either way (the default)
+- `medium` — no signal either way (the default; also: failed verifies that the user has *accepted* as expected)
 - `low` — failed verification, OR has a verify block that's never been run
 
 **Agents are explicitly instructed not to surface low confidence to users as uncertainty.** Instead, low confidence is a signal that the agent should call `confirm_context` before relying on the entry. If verification reveals the entry is wrong, the agent revises it (via `write_context` to the same id) — it doesn't create a duplicate next to the stale one.
+
+Confidence is computed client-side on backends whose servers don't supply it, so the trust signal stays uniform across local, http, and mirror profiles.
+
+### Accept-failed escape hatch
+
+Sometimes a verify failure is intentional — a referenced repo was archived on purpose, a dashboard moved, a file is meant to be regenerated by another tool. Tell the system you know:
+
+```sh
+context accept ref/archived-repo --reason="archived intentionally; kept for history"
+```
+
+The entry stays put; it just stops appearing as a problem in the brief and `doctor --memory`. If the underlying verify ever starts passing again, the accepted flag auto-clears so a re-failure would resurface. Reverse with `context accept --unaccept <id>`.
+
+AI agents can do this via the `accept_context` MCP tool when the user explicitly confirms a failure is expected — they're instructed never to accept on the user's behalf without confirmation.
 
 ### Revise, don't fork
 
@@ -288,14 +324,21 @@ Memory only stays useful if you know when it's wrong. Three places make problems
 
 **Verify-on-write.** When `write_context` receives a `verify:` block, the check runs immediately with a 3-second budget. If it fails, the response includes a `verifyWarning` and the entry is stamped `verifyStatus: "failed"`. The agent sees the failure in the same turn it tried to record the memory — catches "I just saved a reference to a repo that's already archived" at the moment of recording.
 
-**Stale-check on read.** When an agent reads an entry whose `verify:` block hasn't been run in 7+ days, a re-check fires in the background. The current read returns immediately using cached state; the next read sees the fresh result. Natural agent usage becomes self-maintenance — the more a memory gets used, the more it stays honest. Enabled automatically in the MCP server; off by default for library callers.
+**Stale-check on read.** When an agent reads an entry whose `verify:` block hasn't been run in 7+ days, a re-check fires in the background. The current read returns immediately using cached state; the next read sees the fresh result. Natural agent usage becomes self-maintenance — the more a memory gets used, the more it stays honest. Enabled automatically in the MCP server; off by default for library callers. Set `NODUS_DISABLE_BACKGROUND_VERIFY=1` to suppress entirely (useful on metered or air-gapped connections).
 
-**`nodus-context doctor --memory`** runs the same audit on demand and prints a human-readable report:
+**`context doctor --memory`** runs the same audit on demand and prints a human-readable report:
 
 ```sh
-nodus-context doctor --memory
-nodus-context doctor --memory --json   # for scripts and AI assistants
+context doctor --memory
+context doctor --memory --json   # for scripts and AI assistants
+context doctor --json            # one-call view: profile + agents + memory health (for AI orientation)
 ```
+
+**Cross-device acknowledgment.** When the backend supports it (HTTP or mirror), `acknowledge_health` syncs the ack across devices via `/acks` on the protocol. A user who told you "yeah I know about that one" on their laptop won't be asked again from their desktop. Falls back to local-only on backends that don't implement the endpoint.
+
+**Healthline urgency split.** The brief's `## Memory health` header separates urgent (failed verifies) from informational (never-checked, stale, possible duplicates) so the user can tell at a glance whether 12 issues means "alarm" or "routine cleanup." On a fresh install (every entry created within the last 24 hours), never-checked is suppressed from the brief — no nagging during onboarding. `doctor --memory` always shows the full picture.
+
+**Failed entries stay visible.** Rules and preferences whose verify block is failing are still rendered in the brief's content sections with a ⚠ marker — the rule is still active; only the referenced resource may have moved. Memory health flags the verify failure separately.
 
 ## Implementing your own backend
 
@@ -324,13 +367,13 @@ export function createBackend(options: { /* your options */ }): ContextBackend {
 Publish as an npm package, then:
 
 ```sh
-nodus-context profile add my --type=module --path=my-backend-pkg
+context profile add my --type=module --path=my-backend-pkg
 ```
 
 ## Safety
 
 - **Atomic writes** — entries on the local backend are written to a temp file and renamed.
-- **Auto-history** (local) — every overwrite and delete snapshots the previous version. Recover with `nodus-context revert <id>`.
+- **Auto-history** (local) — every overwrite and delete snapshots the previous version. Recover with `context revert <id>`.
 - **Size cap** — 256 KB per entry.
 - **Path validation** — ids are constrained to safe alphanumeric segments; no `..` escapes.
 - **Auth** (http backends) — bearer token via `Authorization` header.

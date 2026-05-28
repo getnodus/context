@@ -3,7 +3,7 @@ import { getBackend } from "../context.js"
 import { configPath, getActiveProfile, loadConfig } from "../../config/index.js"
 import { bold, cyan, dim, green, info, yellow, red } from "../output.js"
 import { getDefaultLocalDir, makeEmbedderFromEnv } from "../../backends/index.js"
-import { computeMemoryHealth, renderHealthHeadline } from "../../backends/health.js"
+import { computeMemoryHealth, renderHealthHeadline, type MemoryHealth } from "../../backends/health.js"
 
 export interface DoctorArgs {
   json?: boolean
@@ -13,7 +13,7 @@ export interface DoctorArgs {
 export async function cmdDoctor(args: DoctorArgs = {}): Promise<void> {
   if (args.memory) return cmdDoctorMemory(args)
   if (args.json) return cmdDoctorJson()
-  info(bold("nodus-context"))
+  info(bold("context"))
   info("")
 
   info(`${dim("config:")} ${cyan(configPath())}`)
@@ -50,6 +50,25 @@ export async function cmdDoctor(args: DoctorArgs = {}): Promise<void> {
   if (backendType !== "http") {
     await renderEmbedderStatus()
     info("")
+  }
+
+  // Inline memory health summary — gives the user/AI a one-glance read of
+  // whether anything needs attention without having to run `--memory`.
+  try {
+    const backend = await getBackend()
+    const health = await computeMemoryHealth(backend)
+    if (health.issueCount === 0 && health.acceptedVerifies.length === 0) {
+      info(`${dim("memory:")} ${green("clean")}  ${dim(`(${health.totalEntries} entries)`)}`)
+    } else {
+      const headline = renderHealthHeadline(health) || "no current issues"
+      const accepted = health.acceptedVerifies.length > 0 ? `  ${dim(`· ${health.acceptedVerifies.length} accepted`)}` : ""
+      const color = health.urgency.urgent > 0 ? red : yellow
+      info(`${dim("memory:")} ${color(headline)}${accepted}`)
+      info(dim(`  full audit: context doctor --memory`))
+    }
+    info("")
+  } catch {
+    // Memory diagnostics are nice-to-have; never fail the doctor over them.
   }
 
   info(bold("Agent integrations"))
@@ -94,19 +113,19 @@ export async function cmdDoctor(args: DoctorArgs = {}): Promise<void> {
   if (anyBroken) {
     info("")
     info(yellow("one or more MCP installs reference a file that no longer exists."))
-    info(`run ${cyan("nodus-context init --repair")} to rewrite them to npx.`)
+    info(`run ${cyan("context init --repair")} to rewrite them to npx.`)
   }
   if (anyStaleRegistration) {
     info("")
     info(yellow("one or more MCP registrations point at an app that isn't installed."))
-    info(`remove with ${cyan("nodus-context uninstall --only=<id>")}.`)
+    info(`remove with ${cyan("context uninstall --only=<id>")}.`)
   }
 }
 
 async function renderEmbedderStatus(): Promise<void> {
   const provider = process.env.NODUS_EMBEDDING_PROVIDER
   if (!provider) {
-    info(`${dim("search:")} substring  ${dim("(set NODUS_EMBEDDING_PROVIDER=ollama for semantic)")}`)
+    info(`${dim("search:")} lexical (BM25)  ${dim("(set NODUS_EMBEDDING_PROVIDER=ollama for semantic)")}`)
     return
   }
   let embedder
@@ -133,6 +152,11 @@ async function renderEmbedderStatus(): Promise<void> {
  * Machine-readable doctor output. Same data as the textual version but
  * shaped for programmatic consumption — designed for AI assistants
  * diagnosing setup state before recommending next actions.
+ *
+ * Includes the memory-health audit so a single `doctor --json` call gives
+ * the agent everything it needs: profile, backend, agents, AND the state
+ * of the store (failed verifies, never-checked, duplicates). No need for
+ * a second `doctor --memory --json` round-trip.
  */
 async function cmdDoctorJson(): Promise<void> {
   const result: Record<string, unknown> = {
@@ -142,6 +166,7 @@ async function cmdDoctorJson(): Promise<void> {
     entries: undefined,
     embedder: undefined,
     agents: [] as unknown[],
+    memory: undefined,
     issues: [] as string[],
   }
   try {
@@ -168,6 +193,12 @@ async function cmdDoctorJson(): Promise<void> {
       result.entries = all.length
     } catch (e) {
       ;(result.issues as string[]).push(`backend unreachable: ${(e as Error).message}`)
+    }
+    try {
+      const health = await computeMemoryHealth(backend)
+      result.memory = summarizeHealthForJson(health)
+    } catch (e) {
+      ;(result.issues as string[]).push(`memory health: ${(e as Error).message}`)
     }
   } catch (e) {
     ;(result.issues as string[]).push(`backend: ${(e as Error).message}`)
@@ -253,11 +284,18 @@ async function cmdDoctorMemory(args: DoctorArgs): Promise<void> {
 
   info(bold("Memory health"))
   info(`${dim("entries:")} ${health.totalEntries}`)
-  if (health.issueCount === 0) {
+  if (health.issueCount === 0 && health.acceptedVerifies.length === 0) {
     info(green("no issues — every entry verifies, nothing looks duplicated"))
     return
   }
-  info(`${dim("issues:")} ${renderHealthHeadline(health)}`)
+  if (health.issueCount > 0) {
+    const headline = renderHealthHeadline(health)
+    const tier =
+      health.urgency.urgent > 0
+        ? red(`${health.urgency.urgent} urgent`)
+        : dim(`${health.urgency.informational} routine`)
+    info(`${dim("issues:")} ${headline}  ${dim("·")} ${tier}`)
+  }
   info("")
 
   if (health.failedVerifies.length > 0) {
@@ -265,6 +303,8 @@ async function cmdDoctorMemory(args: DoctorArgs): Promise<void> {
     for (const e of health.failedVerifies) {
       info(`  ${cyan(e.id)}  ${dim(e.verifyMessage ?? "verification failed")}`)
     }
+    info(dim(`  re-check:      context verify --failed`))
+    info(dim(`  accept (expected): context accept <id> [--reason="..."]`))
     info("")
   }
   if (health.neverVerified.length > 0) {
@@ -273,7 +313,7 @@ async function cmdDoctorMemory(args: DoctorArgs): Promise<void> {
       const spec = e.verify ? `${e.verify.kind}:${e.verify.target}` : ""
       info(`  ${cyan(e.id)}  ${dim(spec)}`)
     }
-    info(dim(`  run: nodus-context verify --all`))
+    info(dim(`  run: context verify --never`))
     info("")
   }
   if (health.staleVerifies.length > 0) {
@@ -281,6 +321,7 @@ async function cmdDoctorMemory(args: DoctorArgs): Promise<void> {
     for (const e of health.staleVerifies) {
       info(`  ${cyan(e.id)}  ${dim(`last verified ${e.verifiedAt?.slice(0, 10)}`)}`)
     }
+    info(dim(`  run: context verify --stale`))
     info("")
   }
   if (health.duplicateClusters.length > 0) {
@@ -288,8 +329,39 @@ async function cmdDoctorMemory(args: DoctorArgs): Promise<void> {
     for (const cluster of health.duplicateClusters) {
       info(`  ${cluster.ids.map((id) => cyan(id)).join(" ↔ ")}  ${dim(`overlap ${cluster.overlap.toFixed(2)}`)}`)
     }
-    info(dim(`  review and merge with: nodus-context show <id> + nodus-context add <id> --supersedes=<old>`))
+    const example = health.duplicateClusters[0]
+    if (example && example.ids.length >= 2) {
+      info(dim(`  merge: context merge ${example.ids[0]} ${example.ids[1]}`))
+    }
     info("")
+  }
+  if (health.acceptedVerifies.length > 0) {
+    info(bold(dim(`Accepted (silenced by user) (${health.acceptedVerifies.length})`)))
+    for (const e of health.acceptedVerifies) {
+      const reason = e.verifyAcceptedReason ? `  ${dim(`— ${e.verifyAcceptedReason}`)}` : ""
+      info(`  ${cyan(e.id)}${reason}`)
+    }
+    info(dim(`  unsuppress: context accept --unaccept <id>`))
+    info("")
+  }
+}
+
+/**
+ * Compact shape of memory health for embedding in `doctor --json`. Lists
+ * are reduced to id strings so the response stays small even on large stores;
+ * full details remain available via `doctor --memory --json`.
+ */
+function summarizeHealthForJson(health: MemoryHealth) {
+  return {
+    totalEntries: health.totalEntries,
+    issueCount: health.issueCount,
+    urgency: health.urgency,
+    freshStore: health.freshStore,
+    failedVerifies: health.failedVerifies.map((e) => ({ id: e.id, key: e.key, verifyMessage: e.verifyMessage })),
+    acceptedVerifies: health.acceptedVerifies.map((e) => ({ id: e.id, reason: e.verifyAcceptedReason ?? null })),
+    neverVerified: health.neverVerified.map((e) => ({ id: e.id, key: e.key })),
+    staleVerifies: health.staleVerifies.map((e) => ({ id: e.id, key: e.key, verifiedAt: e.verifiedAt })),
+    duplicateClusters: health.duplicateClusters.map((c) => ({ ids: c.ids, overlap: c.overlap, key: c.key })),
   }
 }
 

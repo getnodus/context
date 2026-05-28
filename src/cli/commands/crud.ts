@@ -1,8 +1,33 @@
-import { ContextNotFoundError } from "../../backends/index.js"
+import { ContextNotFoundError, VerifySpec } from "../../backends/index.js"
 import { getBackend } from "../context.js"
 import { readStdin, stdinIsTty } from "../stdin.js"
 import { editInEditor } from "../editor.js"
 import { fail, info, renderEntry, renderHits, renderList, green, dim } from "../output.js"
+
+/**
+ * Parse `--verify=kind:target` shorthand into a structured VerifySpec.
+ *
+ * Designed for AI agents teaching the user — easier to remember and to type
+ * in conversation than asking the user to hand-edit YAML frontmatter:
+ *
+ *     context add ref/getnodus --verify=repo:getnodus/context
+ *     context add ref/dashboard --verify=url:https://grafana.example.com/d/x
+ *     context add ref/script --verify=path:~/bin/deploy.sh
+ *
+ * Returns null when the flag is omitted; throws via `fail` on malformed input.
+ */
+export function parseVerifyFlag(value?: string): VerifySpec | undefined {
+  if (!value) return undefined
+  const i = value.indexOf(":")
+  if (i < 1) fail(`--verify must be kind:target (got ${value})`)
+  const kind = value.slice(0, i).trim().toLowerCase()
+  const target = value.slice(i + 1).trim()
+  if (kind !== "url" && kind !== "repo" && kind !== "path") {
+    fail(`--verify kind must be url, repo, or path (got ${kind})`)
+  }
+  if (!target) fail(`--verify target is empty (after kind:)`)
+  return { kind: kind as VerifySpec["kind"], target }
+}
 
 export interface ListArgs {
   prefix?: string
@@ -60,6 +85,7 @@ export interface AddArgs {
   supersedes?: string[]
   expires?: string
   author?: string
+  verify?: string
 }
 
 export async function cmdAdd(args: AddArgs): Promise<void> {
@@ -79,6 +105,7 @@ export async function cmdAdd(args: AddArgs): Promise<void> {
   if (!body) fail("empty body — provide via --body, stdin, or editor")
 
   const author = args.author ?? process.env.NODUS_CONTEXT_AGENT ?? "cli"
+  const verify = parseVerifyFlag(args.verify)
 
   const entry = await backend.write({
     id: args.id,
@@ -89,15 +116,17 @@ export async function cmdAdd(args: AddArgs): Promise<void> {
     supersedes: args.supersedes,
     expires: args.expires,
     author,
+    ...(verify ? { verify } : {}),
   })
+  const verifyTag = entry.verify ? ` ${dim(`· verify=${entry.verify.kind}:${entry.verify.target}`)}` : ""
   info(
     `${green("saved")} ${entry.id} ${dim(
       `(${entry.type}, ${entry.body.length} chars, by ${entry.author})`,
-    )}`,
+    )}${verifyTag}`,
   )
 }
 
-export async function cmdEdit(args: { id: string }): Promise<void> {
+export async function cmdEdit(args: { id: string; verify?: string; clearVerify?: boolean }): Promise<void> {
   const backend = await getBackend()
   let current = ""
   let existing = true
@@ -113,6 +142,24 @@ export async function cmdEdit(args: { id: string }): Promise<void> {
     }
   }
 
+  // When --verify is passed alone (no body changes), don't open the editor;
+  // just attach/update the verify block. AI agents lean on this — they can
+  // attach a verify block to an existing entry in one shot.
+  if ((args.verify || args.clearVerify) && existing) {
+    const verify = args.clearVerify ? undefined : parseVerifyFlag(args.verify)
+    const entry = await backend.write({
+      id: args.id,
+      body: current.trim(),
+      ...(verify ? { verify } : {}),
+    })
+    info(
+      `${green("updated")} ${entry.id} ${dim(
+        verify ? `· verify=${verify.kind}:${verify.target}` : "· verify cleared",
+      )}`,
+    )
+    return
+  }
+
   const updated = await editInEditor(current, `${args.id.replace(/\//g, "-")}.md`)
   const trimmed = updated.trim()
   if (!trimmed) fail("empty body — entry not saved")
@@ -122,7 +169,12 @@ export async function cmdEdit(args: { id: string }): Promise<void> {
     return
   }
 
-  const entry = await backend.write({ id: args.id, body: trimmed })
+  const verify = parseVerifyFlag(args.verify)
+  const entry = await backend.write({
+    id: args.id,
+    body: trimmed,
+    ...(verify ? { verify } : {}),
+  })
   info(`${green(existing ? "updated" : "created")} ${entry.id}`)
 }
 
