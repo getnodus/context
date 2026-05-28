@@ -1,6 +1,6 @@
 {
   "name": "@getnodus/context",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Personal context layer for AI agents. Your memory, portable across every agent you use.",
   "license": "MIT",
   "author": "Nodus (https://github.com/getnodus)",

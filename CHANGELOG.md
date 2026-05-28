@@ -2,7 +2,24 @@
 
 All notable changes to `@getnodus/context` are documented here. Format roughly follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## 0.1.0 — 2026-05-28
+## 0.1.1 — 2026-05-28
+
+A small follow-up to 0.1.0 that broadens client coverage and tightens the memory-discipline contract agents see at startup. 0.1.0 was prepped but never published, so this is the first release on npm after 0.0.12 — the 0.1.0 notes below still apply.
+
+### Agent registry
+
+- **6 new clients** — VS Code Copilot, Roo Code, Gemini CLI, Amp, OpenClaw, OpenCode. The registry is now 13 clients deep, all driven from the same `built-in.ts` table.
+- **`entryShape` on `json-merge`.** OpenCode's MCP entry is non-standard (`{type, command: [...], enabled}` instead of the usual `command: string` + `args: []`); the registry shape lets it round-trip without a bespoke adapter.
+
+### Memory-discipline rules
+
+- **Three rules** threaded through `AGENTS.md` and the MCP server `instructions`:
+  - **Embarrassment test** — would the user be embarrassed if you forgot this next session? If no, don't save it.
+  - **Correction reflex** — when the user corrects an entry, edit-in-place; don't fork a duplicate, don't go quiet.
+  - **Announce on novel saves** — surface the first save of a memory in a session so the user knows what you wrote.
+- **Playbook URL surfaced** via `capabilities --json` and the CLI `--help` footer, so agents can find `AGENTS.md` without scraping the README.
+
+## 0.1.0 — 2026-05-28 *(prepped, not released)*
 
 A foundation release. Memory now maintains itself — entries declare how to check that they're still true, agents call a confirmation tool before ending a turn, and problems surface in the auto-loaded brief instead of hiding in metadata. The CLI is renamed from `nodus-context` to `context` (the old name still works), local search is BM25 lexical out of the box, and several escape hatches (`accept`, `merge`) make memory hygiene a one-command operation. The minor-version bump reflects the magnitude of the diff since 0.0.12; no breaking changes for existing users.
 
