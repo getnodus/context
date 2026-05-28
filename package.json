@@ -1,6 +1,6 @@
 {
   "name": "@getnodus/context",
-  "version": "0.0.14",
+  "version": "0.1.0",
   "description": "Personal context layer for AI agents. Your memory, portable across every agent you use.",
   "license": "MIT",
   "author": "Nodus (https://github.com/getnodus)",
@@ -52,7 +52,7 @@
     "test": "pnpm build && node --import tsx --test test/*.test.ts",
     "start:mcp": "node dist/mcp/server.js",
     "build:mcpb": "node scripts/build-mcpb.mjs",
-    "prepublishOnly": "pnpm build && pnpm test"
+    "prepublishOnly": "pnpm build && pnpm test && pnpm build:mcpb"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.4",
