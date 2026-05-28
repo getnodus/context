@@ -27,6 +27,30 @@ async function setupHttpPair(): Promise<{
   }
 }
 
+test("server-side verifyAccepted: round-trips through PUT/GET", async () => {
+  const { client, server, close } = await setupHttpPair()
+  try {
+    await client.write({
+      id: "ref/silenced",
+      body: "x",
+      verify: { kind: "repo", target: "old/repo" },
+      verifyStatus: "failed",
+      verifyMessage: "archived",
+      verifyAccepted: true,
+      verifyAcceptedAt: "2026-05-01T00:00:00.000Z",
+      verifyAcceptedReason: "kept for history",
+    })
+    const remote = await server.read("ref/silenced")
+    assert.equal(remote.verifyAccepted, true, "server persisted verifyAccepted")
+    assert.equal(remote.verifyAcceptedReason, "kept for history")
+    const round = await client.read("ref/silenced")
+    assert.equal(round.verifyAccepted, true, "client sees verifyAccepted on read")
+    assert.equal(round.verifyAcceptedReason, "kept for history")
+  } finally {
+    await close()
+  }
+})
+
 test("server-side verify-on-write: runs verify when client sends a verify block without status", async () => {
   const { client, server, close } = await setupHttpPair()
   try {

@@ -21,8 +21,9 @@ import {
 import { runVerify } from "../backends/verify.js"
 import {
   computeMemoryHealth,
+  entryHealthMarker,
   filterAcked,
-  isProblemEntry,
+  filterForBrief,
   renderHealthBullets,
   renderHealthHeadline,
 } from "../backends/health.js"
@@ -65,6 +66,9 @@ export async function run() {
         "fact, decision, gotcha, project-state, reference)\n" +
         "  - confirm_context — call this before ending your turn on entries you actually cited; " +
         "it re-verifies them and records a confirmation\n" +
+        "  - accept_context — user has said a failing verify is expected; mark it accepted so " +
+        "it stops being surfaced as a problem\n" +
+        "  - merge_context — combine two entries when search/duplicates flag overlap\n" +
         "  - acknowledge_health — call this after mentioning brief health issues so they don't " +
         "reappear next session\n" +
         "  - list_tags — see existing tags before inventing new ones\n\n" +
@@ -80,6 +84,8 @@ export async function run() {
         "  - If verification reveals the entry is wrong, REVISE THE EXISTING ENTRY via " +
         "`write_context` to the same id. Do NOT create a new entry next to the old one — " +
         "that's how duplicates accumulate.\n" +
+        "  - If the user confirms a failing verify is intentional (e.g. 'yes that repo was " +
+        "archived on purpose'), call `accept_context` so it stops being flagged as a problem.\n" +
         "  - `write_context` returns `relatedExisting[]` when the new content overlaps with " +
         "entries at other ids. Each item has a `relation`: `same-subject` (likely a duplicate — " +
         "strongly prefer overwriting or `supersedes`-linking) or `similar` (sibling concept).\n" +
@@ -87,10 +93,13 @@ export async function run() {
         "in the response, the thing you just referenced may not exist — surface that to the user " +
         "and offer to revise.\n" +
         "  - The brief may include a `## Memory health` section at the top listing failed " +
-        "verifies, never-checked entries, and possible duplicates. Each bullet has a `key`. " +
-        "Mention these to the user ONCE per session, briefly. After mentioning, call " +
-        "`acknowledge_health(keys[])` with the keys you brought up — this is how 'mention once' " +
-        "is enforced. Issues you don't acknowledge will reappear in the next brief.\n\n" +
+        "verifies, never-checked entries, and possible duplicates. Each bullet has a `key` and " +
+        "a suggested CLI fix. Mention these to the user ONCE per session, briefly. After " +
+        "mentioning, call `acknowledge_health(keys[])` with the keys you brought up — this is " +
+        "how 'mention once' is enforced. Issues you don't acknowledge will reappear in the next " +
+        "brief. Failed-verify entries with a ⚠ marker in the brief content sections are still " +
+        "active rules/preferences — apply them; the marker just flags that a referenced " +
+        "resource may have moved.\n\n" +
         "Every entry you write is automatically attributed to your agent (e.g. \"claude-code\", " +
         "\"cursor\"), so other agents can see who wrote what.",
     },
@@ -223,7 +232,10 @@ export async function run() {
         } = {}
         if (verify) {
           try {
-            const result = await runVerify(verify, { timeoutMs: 3000 })
+            // Inline verify keeps writes fast: tighten env-configured timeout
+            // to a 3s ceiling. Background/CLI/`confirm_context` use the full
+            // env-configured budget instead.
+            const result = await runVerify(verify, { inlineBudgetMs: 3000 })
             verifyOutcome = {
               verifyStatus: result.status,
               verifiedAt: new Date().toISOString(),
@@ -361,7 +373,9 @@ export async function run() {
         "verifies, possible duplicates). The acknowledged issues will be suppressed from the brief " +
         "for 7 days or until they change. Pass the `key` field of each issue you mentioned. " +
         "Acknowledging is how 'mention once per session, don't lecture' is actually enforced — " +
-        "if you don't acknowledge, the next brief will repeat the same issues.",
+        "if you don't acknowledge, the next brief will repeat the same issues. When the backend " +
+        "supports cross-device sync (mirror, http), acks propagate so the same issue doesn't get " +
+        "repeated on the user's other machines either.",
       inputSchema: {
         keys: z
           .array(z.string().min(1))
@@ -371,8 +385,131 @@ export async function run() {
     },
     async ({ keys }) => {
       try {
-        const result = await recordAcks(keys)
+        const result = await recordAcks(keys, backend)
         return jsonResult({ acknowledged: result.added, at: result.at })
+      } catch (e) {
+        return errorResult(e)
+      }
+    },
+  )
+
+  server.registerTool(
+    "accept_context",
+    {
+      title: "Accept a known-failing verify",
+      description:
+        "Mark an entry's current failed verify state as expected — 'yes, that repo is archived " +
+        "on purpose'. The entry stays in the store; it just stops appearing as a problem in the " +
+        "brief's Memory health section. If the referenced resource later starts passing again, " +
+        "the accepted flag clears automatically. Use this when the user explicitly tells you a " +
+        "failure is intentional — never accept on their behalf without confirmation.",
+      inputSchema: {
+        id: ID_FIELD,
+        reason: z
+          .string()
+          .optional()
+          .describe(
+            "Why this failure is expected. Stored alongside the entry so future agents (and `doctor --memory`) understand the intent.",
+          ),
+      },
+    },
+    async ({ id, reason }) => {
+      try {
+        const entry = await backend.read(id)
+        if (!entry.verify) {
+          return errorResult(new Error(`${id} has no verify block — nothing to accept`))
+        }
+        const author = resolveAuthor()
+        const nowIso = new Date().toISOString()
+        const saved = await backend.write({
+          id,
+          body: entry.body,
+          title: entry.title,
+          type: entry.type,
+          tags: entry.tags,
+          supersedes: entry.supersedes,
+          expires: entry.expires,
+          author,
+          verify: entry.verify,
+          verifyStatus: entry.verifyStatus,
+          verifiedAt: entry.verifiedAt,
+          ...(entry.verifyMessage !== undefined ? { verifyMessage: entry.verifyMessage } : {}),
+          verifyAccepted: true,
+          verifyAcceptedAt: nowIso,
+          ...(reason ? { verifyAcceptedReason: reason } : {}),
+          confirmations: [
+            ...(entry.confirmations ?? []),
+            { by: author, at: nowIso, method: "user" },
+          ],
+        })
+        return jsonResult({
+          accepted: true,
+          id: saved.id,
+          verifyStatus: saved.verifyStatus,
+          verifyAccepted: saved.verifyAccepted,
+          verifyAcceptedAt: saved.verifyAcceptedAt,
+          ...(saved.verifyAcceptedReason ? { verifyAcceptedReason: saved.verifyAcceptedReason } : {}),
+        })
+      } catch (e) {
+        return errorResult(e)
+      }
+    },
+  )
+
+  server.registerTool(
+    "merge_context",
+    {
+      title: "Merge two context entries",
+      description:
+        "Combine `from` into `into` and delete `from`. Use when the brief or `relatedExisting[]` " +
+        "flags two entries that cover the same subject. By default the merged body is `into`'s " +
+        "body with `from`'s body appended under a `---` divider; pass `body` to override with a " +
+        "consolidated version you write yourself. The merge link is preserved via `supersedes` " +
+        "so history is traceable.",
+      inputSchema: {
+        from: ID_FIELD.describe("The duplicate that will be deleted after merging."),
+        into: ID_FIELD.describe("The canonical entry to keep."),
+        body: z
+          .string()
+          .optional()
+          .describe("Optional consolidated body. Defaults to into's body + '---' + from's body."),
+      },
+    },
+    async ({ from, into, body }) => {
+      try {
+        if (from === into) {
+          return errorResult(new Error("merge_context: from and into must differ"))
+        }
+        const [fromEntry, intoEntry] = await Promise.all([backend.read(from), backend.read(into)])
+        const mergedBody =
+          body !== undefined
+            ? body
+            : `${intoEntry.body.trim()}\n\n---\n\n${fromEntry.body.trim()}`
+        const mergedTags = Array.from(new Set([...(intoEntry.tags ?? []), ...(fromEntry.tags ?? [])]))
+        const supersedes = Array.from(
+          new Set([...(intoEntry.supersedes ?? []), from]),
+        )
+        const author = resolveAuthor()
+        const saved = await backend.write({
+          id: into,
+          body: mergedBody,
+          title: intoEntry.title,
+          type: intoEntry.type,
+          tags: mergedTags,
+          supersedes,
+          expires: intoEntry.expires,
+          author,
+          verify: intoEntry.verify ?? fromEntry.verify,
+          verifyStatus: intoEntry.verifyStatus ?? fromEntry.verifyStatus,
+          verifiedAt: intoEntry.verifiedAt ?? fromEntry.verifiedAt,
+          ...(intoEntry.verifyMessage !== undefined
+            ? { verifyMessage: intoEntry.verifyMessage }
+            : fromEntry.verifyMessage !== undefined
+              ? { verifyMessage: fromEntry.verifyMessage }
+              : {}),
+        })
+        await backend.delete(from)
+        return jsonResult({ merged: true, into: saved.id, removed: from, entry: saved })
       } catch (e) {
         return errorResult(e)
       }
@@ -510,9 +647,9 @@ async function renderBrief(
     backend.list({ prefix: "user/" }),
     backend.list(),
     computeMemoryHealth(backend),
-    loadAcks(),
+    loadAcks(backend),
   ])
-  const health = filterAcked(healthRaw, acks)
+  const health = filterForBrief(filterAcked(healthRaw, acks))
 
   const caps: string[] = []
   if (desc.capabilities.history) caps.push("history")
@@ -550,19 +687,22 @@ async function renderBrief(
 
   let any = false
   for (const [heading, entriesRaw] of sections) {
-    // Hide failed-verify entries from content sections — they're listed in health instead.
     // Order by recency, then cap so the brief stays token-friendly.
-    const entries = entriesRaw
-      .filter((e) => !isProblemEntry(e))
-      .sort((a, b) => b.updated.localeCompare(a.updated))
+    // Failed-verify entries are SHOWN here with a ⚠ marker (not hidden) —
+    // rules and preferences are load-bearing; a failed verify on a
+    // referenced URL doesn't mean the rule itself no longer applies.
+    // Memory health (above) flags the verify failure separately.
+    const entries = entriesRaw.sort((a, b) => b.updated.localeCompare(a.updated))
     if (entries.length === 0) continue
     any = true
     lines.push(`## ${heading}`, "")
     const shown = entries.slice(0, BRIEF_SECTION_CAP)
     for (const e of shown) {
+      const marker = entryHealthMarker(e)
+      const markerPrefix = marker ? `${marker} ` : ""
       const tags = e.tags.length > 0 ? `  _[${e.tags.join(", ")}]_` : ""
       const author = e.author ? `  _by ${e.author}_` : ""
-      lines.push(`- **${e.id}**${tags}${author}`)
+      lines.push(`- ${markerPrefix}**${e.id}**${tags}${author}`)
       if (e.preview) lines.push(`  ${e.preview}`)
     }
     if (entries.length > shown.length) {

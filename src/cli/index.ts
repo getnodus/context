@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { basename } from "node:path"
 import { parseArgs } from "node:util"
 import { runInit } from "./commands/init.js"
 import { runUninstall } from "./commands/uninstall.js"
@@ -10,6 +11,8 @@ import {
   cmdSearch,
   cmdShow,
 } from "./commands/crud.js"
+import { cmdAccept } from "./commands/accept.js"
+import { cmdMerge } from "./commands/merge.js"
 import { cmdDoctor, cmdPath } from "./commands/doctor.js"
 import { cmdHistory, cmdRevert, cmdShowSnapshot } from "./commands/history.js"
 import { cmdExport, cmdImport } from "./commands/portable.js"
@@ -32,10 +35,25 @@ import { cmdCapabilities } from "./commands/capabilities.js"
 import { bold, cyan, dim, fail, info } from "./output.js"
 import { packageVersion } from "./version.js"
 
-const USAGE = `${bold("nodus-context")} — personal context layer for AI agents
+/**
+ * Display the command name as the user actually invoked it. Both `context`
+ * (preferred) and `nodus-context` (legacy) symlink to this script — using
+ * `argv[1]` keeps the in-help examples consistent with what they typed,
+ * which matters for copy-paste.
+ */
+function invokedAs(): string {
+  const argv1 = process.argv[1]
+  if (!argv1) return "context"
+  const name = basename(argv1)
+  return name === "nodus-context" ? "nodus-context" : "context"
+}
+
+function usage(): string {
+  const cmd = invokedAs()
+  return `${bold(cmd)} — personal context layer for AI agents
 
 ${bold("Usage:")}
-  ${cyan("nodus-context")} <command> [args]
+  ${cyan(cmd)} <command> [args]
 
 ${bold("Setup:")}
   init                             Interactive setup wizard
@@ -47,7 +65,9 @@ ${bold("Setup:")}
   join <pairing-string>            One-shot: paste nodus://… string, configure profile + install MCPs
   uninstall [--yes] [--dry-run] [--only=<id>]
                                    Remove the MCP server from detected agents
-  doctor [--json] [--memory]       Show config + integration status (--memory: audit failed/never/duplicate)
+  doctor [--json] [--memory]       Show config + integration status. --json includes memory health
+                                   so one call gives an AI agent the full picture; --memory is the
+                                   human-readable deep audit
   capabilities [--json]            Print supported features for AI orientation
 
 ${bold("Agents:")}
@@ -74,14 +94,31 @@ ${bold("Entries:")}
                                    List entries
   show <id>                        Print one entry
   add <id> [--type=T] [--title=T] [--tag=T] [--supersedes=ID] [--expires=ISO]
-                                   Create/update an entry (stdin or $EDITOR)
-  edit <id>                        Open an entry in $EDITOR
+          [--verify=kind:target]
+                                   Create/update an entry (stdin or $EDITOR).
+                                   --verify attaches a reality check: url:https://…,
+                                   repo:owner/name, or path:/local/file
+  edit <id> [--verify=kind:target] [--clear-verify]
+                                   Open in $EDITOR — or, when --verify is passed alone,
+                                   attach/replace the verify block without opening the editor
   search <query>                   Search (BM25 lexical; semantic when embedder configured)
   delete <id>                      Delete an entry
   tags                             List all tags in use
   stale [--days=90]                Show stale and expired entries
-  verify <id> | --all              Run an entry's verify block; stamps verifyStatus/verifiedAt
-                                   (use on entries whose 'verify:' declares url/repo/path)
+
+${bold("Memory hygiene:")}
+  verify <id>                      Run an entry's verify block once
+  verify --all                     Re-check every entry with a verify block
+  verify --failed                  Re-check only currently failed entries
+  verify --never                   Check entries that have a verify but never ran
+  verify --stale                   Re-check entries verified >30 days ago
+  accept <id> [--reason="..."]     Mark a failed verify as expected (e.g. "repo is intentionally
+                                   archived"). Suppresses it from health surfaces until a
+                                   passing verify auto-clears, or you run --unaccept
+  accept --unaccept <id>           Reverse a prior accept
+  merge <from> <into> [--body=...] Combine two entries: appends from's body to into's, links via
+                                   supersedes, deletes from. Pipe stdin or pass --body to provide
+                                   a hand-consolidated body
 
 ${bold("History:")}
   history <id>                     List prior versions
@@ -104,13 +141,15 @@ ${bold("Other:")}
 
 ${dim("Storage: ~/.nodus/context/  (override with NODUS_CONTEXT_DIR)")}
 ${dim("Config:  ~/.nodus/config.json (override with NODUS_CONFIG_DIR)")}
-${dim("Add --json to list/show/search/tags/history/profile-list for JSON output.")}
+${dim("Verify:  set NODUS_VERIFY_TIMEOUT_MS to change timeout; NODUS_DISABLE_BACKGROUND_VERIFY=1 to opt out")}
+${dim("Add --json to list/show/search/tags/history/profile-list/accept/merge/verify for JSON output.")}
 `
+}
 
 async function main(argv: string[]): Promise<void> {
   const [cmd, ...rest] = argv
   if (!cmd || cmd === "help" || cmd === "--help" || cmd === "-h") {
-    process.stdout.write(USAGE)
+    process.stdout.write(usage())
     return
   }
 
@@ -158,7 +197,11 @@ async function main(argv: string[]): Promise<void> {
     case "add":
       return cmdAdd(parseAdd(rest))
     case "edit":
-      return cmdEdit(parseSingleId(rest, "edit"))
+      return cmdEdit(parseEdit(rest))
+    case "accept":
+      return cmdAccept(parseAccept(rest))
+    case "merge":
+      return cmdMerge(parseMerge(rest))
     case "search":
       return cmdSearch(parseSearch(rest))
     case "delete":
@@ -216,7 +259,7 @@ async function main(argv: string[]): Promise<void> {
       info(packageVersion())
       return
     default:
-      fail(`unknown command: ${cmd}\n\nrun '${bold("nodus-context help")}' for usage`)
+      fail(`unknown command: ${cmd}\n\nrun '${bold(`${invokedAs()} help`)}' for usage`)
   }
 }
 
@@ -371,6 +414,7 @@ function parseAdd(args: string[]) {
       supersedes: { type: "string", multiple: true },
       expires: { type: "string" },
       author: { type: "string" },
+      verify: { type: "string" },
     },
     allowPositionals: true,
   })
@@ -385,6 +429,70 @@ function parseAdd(args: string[]) {
     supersedes: parsed.values.supersedes,
     expires: parsed.values.expires,
     author: parsed.values.author,
+    verify: parsed.values.verify,
+  }
+}
+
+function parseEdit(args: string[]) {
+  const parsed = parseArgs({
+    args,
+    options: {
+      verify: { type: "string" },
+      "clear-verify": { type: "boolean" },
+    },
+    allowPositionals: true,
+  })
+  const id = parsed.positionals[0]
+  if (!id) fail("edit: missing <id>")
+  return {
+    id,
+    verify: parsed.values.verify,
+    clearVerify: parsed.values["clear-verify"],
+  }
+}
+
+function parseAccept(args: string[]) {
+  const parsed = parseArgs({
+    args,
+    options: {
+      reason: { type: "string" },
+      unaccept: { type: "boolean" },
+      author: { type: "string" },
+      json: { type: "boolean" },
+    },
+    allowPositionals: true,
+  })
+  const id = parsed.positionals[0]
+  if (!id) fail("accept: missing <id>")
+  return {
+    id,
+    reason: parsed.values.reason,
+    unaccept: parsed.values.unaccept,
+    author: parsed.values.author,
+    json: parsed.values.json,
+  }
+}
+
+function parseMerge(args: string[]) {
+  const parsed = parseArgs({
+    args,
+    options: {
+      body: { type: "string" },
+      yes: { type: "boolean", short: "y" },
+      author: { type: "string" },
+      json: { type: "boolean" },
+    },
+    allowPositionals: true,
+  })
+  const [from, into] = parsed.positionals
+  if (!from || !into) fail("merge: usage is 'context merge <from> <into>'")
+  return {
+    from,
+    into,
+    body: parsed.values.body,
+    yes: parsed.values.yes,
+    author: parsed.values.author,
+    json: parsed.values.json,
   }
 }
 
@@ -442,6 +550,10 @@ function parseVerify(args: string[]) {
     args,
     options: {
       all: { type: "boolean" },
+      failed: { type: "boolean" },
+      never: { type: "boolean" },
+      stale: { type: "boolean" },
+      force: { type: "boolean" },
       json: { type: "boolean" },
     },
     allowPositionals: true,
@@ -449,6 +561,10 @@ function parseVerify(args: string[]) {
   return {
     id: parsed.positionals[0],
     all: parsed.values.all,
+    failed: parsed.values.failed,
+    never: parsed.values.never,
+    stale: parsed.values.stale,
+    force: parsed.values.force,
     json: parsed.values.json,
   }
 }

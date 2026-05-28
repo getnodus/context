@@ -4,6 +4,15 @@ import { tokenize } from "./lexical.js"
 const STALE_VERIFY_MS = 30 * 24 * 60 * 60 * 1000
 const ACK_TTL_MS = 7 * 24 * 60 * 60 * 1000
 
+/**
+ * "Fresh store" grace window. On a brand new install (every entry created
+ * within the last 24h), `neverVerified` is suppressed from the brief —
+ * the user just added them, of course they haven't been checked yet.
+ * `doctor --memory` still shows the full picture; this is only about not
+ * nagging during onboarding.
+ */
+const FRESH_STORE_GRACE_MS = 24 * 60 * 60 * 1000
+
 export interface DuplicateCluster {
   /** Two or more entry ids that look like duplicates of each other. */
   ids: string[]
@@ -18,18 +27,36 @@ export interface MemoryHealthEntry extends ContextEntrySummary {
   key: string
 }
 
+export interface AcceptedHealthEntry extends MemoryHealthEntry {
+  verifyAcceptedAt?: string
+  verifyAcceptedReason?: string
+}
+
 export interface MemoryHealth {
   totalEntries: number
-  /** Entries with `verifyStatus: "failed"` — the world has changed, the memory hasn't. */
+  /** Entries with `verifyStatus: "failed"` and NOT user-accepted — the world has changed, the memory hasn't. */
   failedVerifies: MemoryHealthEntry[]
+  /** Entries the user has explicitly accepted as known-failing. Informational only — not surfaced to agents as a problem. */
+  acceptedVerifies: AcceptedHealthEntry[]
   /** Entries with a `verify:` block that has never been run. */
   neverVerified: MemoryHealthEntry[]
   /** Entries verified successfully but more than 30 days ago. */
   staleVerifies: MemoryHealthEntry[]
   /** Near-duplicate entry pairs at different ids (candidate revise-or-supersede targets). */
   duplicateClusters: DuplicateCluster[]
-  /** Total count of issues (sum of the buckets above). Useful for one-line summaries. */
+  /** Total count of issues (failedVerifies + neverVerified + staleVerifies + duplicateClusters). Excludes accepted. */
   issueCount: number
+  /**
+   * Counts split by urgency tier:
+   *  - `urgent`        — needs eyes: failed verifies (not accepted)
+   *  - `informational` — routine cleanup: never-checked, stale, possible duplicates
+   */
+  urgency: { urgent: number; informational: number }
+  /**
+   * True if every entry was created within the last 24h (fresh install).
+   * The brief uses this to suppress never-checked nags during onboarding.
+   */
+  freshStore: boolean
 }
 
 export interface HealthOptions {
@@ -55,7 +82,7 @@ export async function computeMemoryHealth(
   options: HealthOptions = {},
 ): Promise<MemoryHealth> {
   if (backend.health) {
-    return backend.health(options)
+    return normalizeHealth(await backend.health(options))
   }
   return computeMemoryHealthDirect(backend, options)
 }
@@ -74,12 +101,22 @@ export async function computeMemoryHealthDirect(
   const summaries = await backend.list({ includeExpired: false, limit: 500 })
 
   const failedVerifies: MemoryHealthEntry[] = []
+  const acceptedVerifies: AcceptedHealthEntry[] = []
   const neverVerified: MemoryHealthEntry[] = []
   const staleVerifies: MemoryHealthEntry[] = []
 
   for (const e of summaries) {
     if (e.verifyStatus === "failed") {
-      failedVerifies.push({ ...e, key: `failed:${e.id}` })
+      if (e.verifyAccepted) {
+        acceptedVerifies.push({
+          ...e,
+          key: `accepted:${e.id}`,
+          verifyAcceptedAt: e.verifyAcceptedAt,
+          verifyAcceptedReason: e.verifyAcceptedReason,
+        })
+      } else {
+        failedVerifies.push({ ...e, key: `failed:${e.id}` })
+      }
       continue
     }
     if (e.verify && !e.verifiedAt) {
@@ -99,17 +136,50 @@ export async function computeMemoryHealthDirect(
     duplicateClusters = await findDuplicateClusters(backend, summaries)
   }
 
+  const freshStore =
+    summaries.length > 0 &&
+    summaries.every((e) => now - Date.parse(e.created) <= FRESH_STORE_GRACE_MS)
+
+  const urgent = failedVerifies.length
+  const informational =
+    neverVerified.length + staleVerifies.length + duplicateClusters.length
+
   return {
     totalEntries: summaries.length,
     failedVerifies,
+    acceptedVerifies,
     neverVerified,
     staleVerifies,
     duplicateClusters,
-    issueCount:
-      failedVerifies.length +
-      neverVerified.length +
-      staleVerifies.length +
-      duplicateClusters.length,
+    issueCount: urgent + informational,
+    urgency: { urgent, informational },
+    freshStore,
+  }
+}
+
+/**
+ * Backfill defaults for health payloads coming from older backends (e.g.
+ * HTTP server before urgency/freshStore was added). Keeps consumers safe
+ * without making every server upgrade in lockstep.
+ */
+function normalizeHealth(raw: any): MemoryHealth {
+  const failedVerifies: MemoryHealthEntry[] = Array.isArray(raw?.failedVerifies) ? raw.failedVerifies : []
+  const acceptedVerifies: AcceptedHealthEntry[] = Array.isArray(raw?.acceptedVerifies) ? raw.acceptedVerifies : []
+  const neverVerified: MemoryHealthEntry[] = Array.isArray(raw?.neverVerified) ? raw.neverVerified : []
+  const staleVerifies: MemoryHealthEntry[] = Array.isArray(raw?.staleVerifies) ? raw.staleVerifies : []
+  const duplicateClusters: DuplicateCluster[] = Array.isArray(raw?.duplicateClusters) ? raw.duplicateClusters : []
+  const urgent = failedVerifies.length
+  const informational = neverVerified.length + staleVerifies.length + duplicateClusters.length
+  return {
+    totalEntries: typeof raw?.totalEntries === "number" ? raw.totalEntries : 0,
+    failedVerifies,
+    acceptedVerifies,
+    neverVerified,
+    staleVerifies,
+    duplicateClusters,
+    issueCount: typeof raw?.issueCount === "number" ? raw.issueCount : urgent + informational,
+    urgency: raw?.urgency ?? { urgent, informational },
+    freshStore: raw?.freshStore === true,
   }
 }
 
@@ -125,7 +195,8 @@ export function isAcked(acks: HealthAckMap | undefined, key: string, now = Date.
 /**
  * Returns a copy of `health` with acknowledged-recently issues removed. Used
  * by the brief renderer so "mention once per session" is enforced rather than
- * left as a convention.
+ * left as a convention. Accepted-verifies are never filtered (they're already
+ * a user-driven suppression, not a transient ack).
  */
 export function filterAcked(
   health: MemoryHealth,
@@ -139,17 +210,37 @@ export function filterAcked(
   const neverVerified = keep(health.neverVerified)
   const staleVerifies = keep(health.staleVerifies)
   const duplicateClusters = keep(health.duplicateClusters)
+  const urgent = failedVerifies.length
+  const informational = neverVerified.length + staleVerifies.length + duplicateClusters.length
   return {
     ...health,
     failedVerifies,
     neverVerified,
     staleVerifies,
     duplicateClusters,
-    issueCount:
-      failedVerifies.length +
-      neverVerified.length +
-      staleVerifies.length +
-      duplicateClusters.length,
+    issueCount: urgent + informational,
+    urgency: { urgent, informational },
+  }
+}
+
+/**
+ * Trim health down to what should actually appear in the brief — applies
+ * the "fresh store" grace by hiding never-checked on a brand new install.
+ * The full picture stays available via `doctor --memory`; this is only
+ * about not nagging during onboarding.
+ */
+export function filterForBrief(health: MemoryHealth): MemoryHealth {
+  if (!health.freshStore) return health
+  const neverVerified: MemoryHealthEntry[] = []
+  const informational =
+    neverVerified.length +
+    health.staleVerifies.length +
+    health.duplicateClusters.length
+  return {
+    ...health,
+    neverVerified,
+    issueCount: health.failedVerifies.length + informational,
+    urgency: { urgent: health.failedVerifies.length, informational },
   }
 }
 
@@ -205,23 +296,20 @@ function jaccard(a: Set<string>, b: Set<string>): number {
 
 /**
  * Compact one-line summary for surfaces that can only show a single line
- * (e.g. the brief header). Returns empty string when nothing is wrong.
+ * (e.g. the brief header). Splits urgent vs informational so consumers can
+ * style or color them differently. Returns empty string when nothing's wrong.
  */
 export function renderHealthHeadline(health: MemoryHealth): string {
-  const parts: string[] = []
-  if (health.failedVerifies.length > 0) {
-    parts.push(`${health.failedVerifies.length} failed verifies`)
-  }
-  if (health.neverVerified.length > 0) {
-    parts.push(`${health.neverVerified.length} never checked`)
-  }
-  if (health.staleVerifies.length > 0) {
-    parts.push(`${health.staleVerifies.length} stale verifies`)
-  }
-  if (health.duplicateClusters.length > 0) {
-    parts.push(`${health.duplicateClusters.length} possible duplicates`)
-  }
-  return parts.join(" · ")
+  const urgent: string[] = []
+  const info: string[] = []
+  if (health.failedVerifies.length > 0) urgent.push(`${health.failedVerifies.length} failed`)
+  if (health.neverVerified.length > 0) info.push(`${health.neverVerified.length} never checked`)
+  if (health.staleVerifies.length > 0) info.push(`${health.staleVerifies.length} stale`)
+  if (health.duplicateClusters.length > 0) info.push(`${health.duplicateClusters.length} possible duplicates`)
+  if (urgent.length === 0 && info.length === 0) return ""
+  if (urgent.length === 0) return info.join(" · ")
+  if (info.length === 0) return urgent.join(" · ")
+  return `${urgent.join(" · ")}  ·  (${info.join(", ")})`
 }
 
 /**
@@ -234,7 +322,7 @@ export function renderHealthBullets(health: MemoryHealth, maxEach = 3): string[]
   const lines: string[] = []
   for (const e of health.failedVerifies.slice(0, maxEach)) {
     const reason = e.verifyMessage ?? "verification failed"
-    lines.push(`- ⚠ \`${e.id}\` — ${reason}  _(key: \`${e.key}\`)_`)
+    lines.push(`- ⚠ \`${e.id}\` — ${reason}  _(key: \`${e.key}\`; \`context accept ${e.id}\` to silence if expected)_`)
   }
   if (health.failedVerifies.length > maxEach) {
     lines.push(`- _…and ${health.failedVerifies.length - maxEach} more failed verifies_`)
@@ -247,7 +335,7 @@ export function renderHealthBullets(health: MemoryHealth, maxEach = 3): string[]
   }
   for (const cluster of health.duplicateClusters.slice(0, maxEach)) {
     lines.push(
-      `- ⇄ possible duplicates: ${cluster.ids.map((id) => `\`${id}\``).join(" / ")}  _(key: \`${cluster.key}\`)_`,
+      `- ⇄ possible duplicates: ${cluster.ids.map((id) => `\`${id}\``).join(" / ")}  _(key: \`${cluster.key}\`; \`context merge ${cluster.ids[0]} ${cluster.ids[1]}\` to combine)_`,
     )
   }
   if (health.duplicateClusters.length > maxEach) {
@@ -264,7 +352,13 @@ export function renderHealthBullets(health: MemoryHealth, maxEach = 3): string[]
   return lines
 }
 
-/** Returns true when the entry should be hidden from brief content sections (still listed under health). */
-export function isProblemEntry(entry: ContextEntry | ContextEntrySummary): boolean {
-  return entry.verifyStatus === "failed"
+/**
+ * Marker for entries that should be tagged in brief content sections but
+ * NOT hidden. Failed verifies on rules/preferences are load-bearing — the
+ * rule is still active even if a referenced URL moved.
+ */
+export function entryHealthMarker(entry: ContextEntry | ContextEntrySummary): string | null {
+  if (entry.verifyStatus === "failed" && !entry.verifyAccepted) return "⚠"
+  if (entry.verify && !entry.verifiedAt) return "◐"
+  return null
 }

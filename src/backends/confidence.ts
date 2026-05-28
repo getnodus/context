@@ -16,20 +16,23 @@ const RECENT_CONFIRMATION_MS = 30 * 24 * 60 * 60 * 1000
  * `confirm_context` before its turn ends.
  *
  * Signals (in priority order):
- *  - verifyStatus=failed                    → low
- *  - verify spec exists but never run       → low (prompts agent to check)
- *  - verifyStatus=ok and verified ≤30d ago  → high
- *  - ≥2 distinct confirmers in last 30d     → high (cross-agent corroboration)
- *  - anything else                          → medium
+ *  - verifyStatus=failed + verifyAccepted=true → medium (user accepted the failure state)
+ *  - verifyStatus=failed                       → low
+ *  - verify spec exists but never run          → low (prompts agent to check)
+ *  - verifyStatus=ok and verified ≤30d ago     → high
+ *  - ≥2 distinct confirmers in last 30d        → high (cross-agent corroboration)
+ *  - anything else                             → medium
  */
 export function computeConfidence(
   entry: Pick<
     ContextEntry | ContextEntrySummary,
-    "verify" | "verifyStatus" | "verifiedAt"
+    "verify" | "verifyStatus" | "verifiedAt" | "verifyAccepted"
   > & { confirmations?: ContextEntry["confirmations"] },
   now: number = Date.now(),
 ): Confidence {
-  if (entry.verifyStatus === "failed") return "low"
+  if (entry.verifyStatus === "failed") {
+    return entry.verifyAccepted ? "medium" : "low"
+  }
   if (entry.verify && !entry.verifiedAt) {
     return "low"
   }

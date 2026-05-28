@@ -137,7 +137,7 @@ export async function runWizard(_opts: WizardOptions = {}): Promise<void> {
 }
 
 function banner(): void {
-  info(bold(`\nnodus-context setup  ${dim(`v${packageVersion()}`)}`))
+  info(bold(`\ncontext setup  ${dim(`v${packageVersion()}`)}`))
   info(dim("Personal context layer for AI agents. Press Ctrl+C any time to cancel.\n"))
 }
 

@@ -14,6 +14,7 @@ import {
   WriteInput,
 } from "./types.js"
 import { computeMemoryHealthDirect, type MemoryHealth } from "./health.js"
+import { computeConfidence } from "./confidence.js"
 
 export interface HttpBackendOptions {
   /** Base URL, e.g. "https://memory.example.com" — no trailing slash. */
@@ -87,6 +88,9 @@ export class HttpBackend implements ContextBackend {
       verifiedAt: input.verifiedAt,
       verifyStatus: input.verifyStatus,
       verifyMessage: input.verifyMessage,
+      verifyAccepted: input.verifyAccepted,
+      verifyAcceptedAt: input.verifyAcceptedAt,
+      verifyAcceptedReason: input.verifyAcceptedReason,
       confirmations: input.confirmations,
     })
     return (await this.#json(res)) as ContextEntry
@@ -124,11 +128,14 @@ export class HttpBackend implements ContextBackend {
     const res = await this.#req("GET", `/search?${params}`)
     const body = (await this.#json(res)) as { hits?: SearchHit[] } | SearchHit[]
     const hits = Array.isArray(body) ? body : (body.hits ?? [])
-    // Older servers don't return a confidence field; default to "medium" so
-    // the client surface is uniform regardless of backend.
+    // Older servers don't return a confidence field — compute it client-side
+    // from the entry's verify state so the trust signal stays uniform across
+    // backends. We only fall back when the server omits it; a server that
+    // implements confidence (possibly with richer signals like cross-server
+    // corroboration) is always respected.
     for (const hit of hits) {
       if (hit.confidence !== "low" && hit.confidence !== "medium" && hit.confidence !== "high") {
-        hit.confidence = "medium"
+        hit.confidence = computeConfidence(hit.entry)
       }
     }
     return hits
@@ -138,6 +145,41 @@ export class HttpBackend implements ContextBackend {
     const res = await this.#req("GET", "/tags")
     const body = (await this.#json(res)) as { tags?: TagCount[] } | TagCount[]
     return Array.isArray(body) ? body : (body.tags ?? [])
+  }
+
+  async listAcks(): Promise<Record<string, string>> {
+    try {
+      const res = await this.#req("GET", "/acks")
+      if (res.status === 404) return {}
+      const body = (await this.#json(res)) as { acks?: Record<string, string> } | Record<string, string>
+      if (!body || typeof body !== "object") return {}
+      // tolerant of either { acks: {...} } or {...} at top level
+      const acks = (body as any).acks ?? body
+      const out: Record<string, string> = {}
+      for (const [k, v] of Object.entries(acks)) {
+        if (typeof v === "string") out[k] = v
+      }
+      return out
+    } catch {
+      // Server unreachable, doesn't implement /acks, etc. — degrade silently.
+      return {}
+    }
+  }
+
+  async recordAcks(keys: string[]): Promise<{ added: number; at: string }> {
+    const at = new Date().toISOString()
+    if (keys.length === 0) return { added: 0, at }
+    try {
+      const res = await this.#req("POST", "/acks", { keys })
+      if (res.status === 404) return { added: 0, at }
+      const body = (await this.#json(res)) as { added?: number; at?: string } | undefined
+      return {
+        added: typeof body?.added === "number" ? body.added : keys.length,
+        at: typeof body?.at === "string" ? body.at : at,
+      }
+    } catch {
+      return { added: 0, at }
+    }
   }
 
   async health(options: { now?: number; duplicateScanLimit?: number } = {}): Promise<MemoryHealth> {
