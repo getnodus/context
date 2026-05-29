@@ -382,9 +382,11 @@ context profile add my --type=module --path=my-backend-pkg
 
 `@getnodus/context` is a local-first tool. The only outbound calls it makes on its own behalf are:
 
-- **Update check** — once every 24 hours, a request to `https://registry.npmjs.org/@getnodus/context/latest` to compare your installed version to the latest published. 1.5s timeout; failures are silent. Disable with `NODUS_DISABLE_UPDATE_CHECK=1`. Skipped automatically in CI.
-- **Verify blocks** — only fire when an entry declares one. `kind: url` hits the URL you specified; `kind: repo` hits `https://api.github.com/repos/<owner>/<name>`; `kind: path` is local-only. Bounded by `NODUS_VERIFY_TIMEOUT_MS` (8s default; 3s for inline verify-on-write). Disable background re-checks with `NODUS_DISABLE_BACKGROUND_VERIFY=1`.
-- **HTTP backend / ack sync** — only when you configure an `http` or `mirror` profile. All traffic goes to the server URL you provided.
+| Call | What it does | When it fires | Kill switch |
+| --- | --- | --- | --- |
+| **Update check** | GET `https://registry.npmjs.org/@getnodus/context/latest` to compare your installed version to the latest published. 1.5s timeout; failures are silent. | At most once every 24h on CLI startup; on `doctor`; briefly in the MCP server brief. Skipped automatically in CI. | `NODUS_DISABLE_UPDATE_CHECK=1` |
+| **Verify blocks** | Resolves an entry's `verify:` declaration. `kind: url` hits the URL you specified; `kind: repo` hits `https://api.github.com/repos/<owner>/<name>`; `kind: path` is local-only. | Inline on write (3s cap). Background re-check fires on read when an entry's `verify:` is more than 7 days old; enabled in the MCP server, off by default for library callers. | `NODUS_DISABLE_BACKGROUND_VERIFY=1` (background only). Tune timeout with `NODUS_VERIFY_TIMEOUT_MS` (8s default; 3s cap on inline). |
+| **HTTP backend / ack sync** | All read/write traffic for `http` and `mirror` profiles, plus ack sync between local mirror and the configured server. | Only when the active profile is `http` or `mirror`. Traffic goes to the server URL you provided. | Switch the active profile to `local`. |
 
 No telemetry. No analytics. Entry contents never leave the local backend unless you configure a remote profile.
 

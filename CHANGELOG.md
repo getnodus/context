@@ -6,6 +6,10 @@ All notable changes to `@getnodus/context` are documented here. Format roughly f
 
 <!-- New entries land here. Group under topical subheadings (e.g. *Agent registry*, *Self-maintaining memory*) to match past releases. -->
 
+### Docs
+
+- **Kill-switch table in `README` _Network use_.** One row per outbound call (what it does / when it fires / how to turn it off), keeping the bullet prose's content in a single at-a-glance table so `SECURITY.md`'s "see Network use for the full list" lands somewhere concrete and the two stay in sync as new outbound calls land.
+
 ## 0.1.1 — 2026-05-28
 
 A small follow-up to 0.1.0 that broadens client coverage and tightens the memory-discipline contract agents see at startup. 0.1.0 was prepped but never published, so this is the first release on npm after 0.0.12 — the 0.1.0 notes below still apply.
