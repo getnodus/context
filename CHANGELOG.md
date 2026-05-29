@@ -6,6 +6,10 @@ All notable changes to `@getnodus/context` are documented here. Format roughly f
 
 <!-- New entries land here. Group under topical subheadings (e.g. *Agent registry*, *Self-maintaining memory*) to match past releases. -->
 
+### Build
+
+- **Migrated to TypeScript 6.** TS 6 stopped picking up `@types/node` implicitly, so the build flooded with errors for `process`, `fetch`, `Buffer`, `node:*` imports and other Node globals. `tsconfig.json` now declares `"types": ["node"]` explicitly, restoring resolution. `pnpm typecheck && pnpm test` are green on TS 6.0.3 across the Node 20/22/24 matrix.
+
 ### Agent registry
 
 - **Three new clients: LM Studio, Warp, and Jan.** `setup` can now detect and install into LM Studio (`~/.lmstudio/mcp.json`), Warp (global `~/.warp/.mcp.json`), and Jan (`mcp_config.json` in Jan's data folder). All three use the canonical `mcpServers` object map; Jan entries are written with `active: true` so the server is enabled without a GUI toggle.
