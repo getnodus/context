@@ -50,6 +50,7 @@
     "dev": "tsc --watch",
     "typecheck": "tsc --noEmit",
     "test": "pnpm build && node --import tsx --test test/*.test.ts",
+    "test:coverage": "pnpm build && node --import tsx --test --experimental-test-coverage test/*.test.ts",
     "start:mcp": "node dist/mcp/server.js",
     "build:mcpb": "node scripts/build-mcpb.mjs",
     "prepublishOnly": "pnpm build && pnpm test && pnpm build:mcpb"
@@ -68,6 +69,7 @@
   "engines": {
     "node": ">=20"
   },
+  "packageManager": "pnpm@10.34.1",
   "publishConfig": {
     "access": "public"
   }
