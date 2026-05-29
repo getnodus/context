@@ -260,6 +260,48 @@ test("Jan entryShape writes `active: true` and round-trips to canonical", async 
   })
 })
 
+test("BoltAI is registered as a json-merge agent at ~/.boltai/mcp.json", async () => {
+  await withConfigDir(async () => {
+    const agents = await loadAgents()
+    const rec = agents.find((a) => a.definition.id === "boltai")
+    assert.ok(rec, "boltai should be a registered built-in")
+    const install = rec!.definition.install
+    assert.equal(install.type, "json-merge")
+    assert.ok(
+      (install as { path: string }).path.endsWith(join(".boltai", "mcp.json")),
+      "boltai should install into ~/.boltai/mcp.json",
+    )
+    assert.equal((install as { entryShape?: string }).entryShape, undefined, "BoltAI uses the canonical entry shape")
+  })
+})
+
+test("BoltAI install + read + uninstall round-trip (canonical mcpServers)", async () => {
+  await withConfigDir(async (configDir) => {
+    const mcpFile = join(configDir, "boltai-mcp.json")
+    const def: AgentDefinition = {
+      id: "boltai-clone",
+      name: "BoltAI-clone",
+      configPathHint: mcpFile,
+      detect: { type: "always" },
+      install: { type: "json-merge", path: mcpFile },
+    }
+    const resolved = mkResolved(def)
+    const cmd = mcpCommandNpx()
+    assert.equal((await installAgent(resolved, cmd)).status, "installed")
+
+    const raw = JSON.parse(await readFile(mcpFile, "utf8"))
+    const entry = raw.mcpServers?.["nodus-context"]
+    assert.ok(entry, "entry should land under mcpServers")
+    assert.equal(entry.command, cmd.command)
+    assert.deepEqual(entry.args, cmd.args)
+
+    const read = await readMcp(resolved)
+    assert.equal(read?.command, cmd.command)
+    assert.equal((await installAgent(resolved, cmd)).status, "already-installed")
+    assert.equal(await uninstallAgent(resolved), true)
+  })
+})
+
 test("LM Studio, Warp, and Jan are registered with the expected install targets", async () => {
   await withConfigDir(async () => {
     const agents = await loadAgents()
