@@ -59,6 +59,7 @@
     "@modelcontextprotocol/sdk": "^1.0.4",
     "bonjour-service": "^1.4.0",
     "gray-matter": "^4.0.3",
+    "yaml": "^2.6.0",
     "zod": "^4.0.0"
   },
   "devDependencies": {
