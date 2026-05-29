@@ -6,6 +6,10 @@ All notable changes to `@getnodus/context` are documented here. Format roughly f
 
 <!-- New entries land here. Group under topical subheadings (e.g. *Agent registry*, *Self-maintaining memory*) to match past releases. -->
 
+### Build
+
+- **Migrated to TypeScript 6.** TS 6 stopped picking up `@types/node` implicitly, so the build flooded with errors for `process`, `fetch`, `Buffer`, `node:*` imports and other Node globals. `tsconfig.json` now declares `"types": ["node"]` explicitly, restoring resolution. `pnpm typecheck && pnpm test` are green on TS 6.0.3 across the Node 20/22/24 matrix.
+
 ### Agent registry
 
 - **New client: 5ire.** `setup` can now detect and install into [5ire](https://github.com/nanbingxyz/5ire). 5ire keeps its MCP servers in `mcp.json` (in its Electron `userData` dir) under the canonical `mcpServers` object map; entries are written with `isActive: true` (new `5ire` entry shape) because 5ire only auto-connects servers flagged active. Detected via the `5ire` app bundle/binary or its config directory.
