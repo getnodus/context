@@ -9,6 +9,7 @@ All notable changes to `@getnodus/context` are documented here. Format roughly f
 ### Agent registry
 
 - **Three new clients: LM Studio, Warp, and Jan.** `setup` can now detect and install into LM Studio (`~/.lmstudio/mcp.json`), Warp (global `~/.warp/.mcp.json`), and Jan (`mcp_config.json` in Jan's data folder). All three use the canonical `mcpServers` object map; Jan entries are written with `active: true` so the server is enabled without a GUI toggle.
+- **LM Studio macOS path fallback.** Some macOS installs read `~/.cache/lm-studio/mcp.json` and never create `~/.lmstudio` ([upstream bug #1371](https://github.com/lmstudio-ai/lmstudio-bug-tracker/issues/1371)). Install now writes the cache path when that's the directory LM Studio actually uses, so the registration isn't silently ignored; the documented path is still preferred when present.
 - **Gemini CLI now installs at user scope.** `gemini mcp add` defaults to *project* scope, which wrote the server into a `./.gemini/settings.json` in whatever directory `setup` happened to run from. The registry now passes `-s user`, so the server is registered globally in `~/.gemini/settings.json` — matching the JSON fallback and the behavior every other agent gives.
 - **VS Code entries carry an explicit `type: "stdio"`.** VS Code infers the transport today, but its MCP schema marks `type` as required; the new `vscode` entry shape writes it so the registration stays valid against stricter validation.
 

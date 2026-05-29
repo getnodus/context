@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs"
 import { homedir, platform } from "node:os"
 import { join } from "node:path"
 import { AgentDefinition } from "./types.js"
@@ -100,8 +101,17 @@ export function builtInAgents(): AgentDefinition[] {
   const opencodeConfig = join(home, ".config", "opencode", "opencode.json")
 
   // ----- LM Studio -----
-  // mcp.json at ~/.lmstudio/mcp.json, Cursor-style `mcpServers` object map.
-  const lmStudioConfig = join(home, ".lmstudio", "mcp.json")
+  // mcp.json at ~/.lmstudio/mcp.json (Cursor-style `mcpServers` object map).
+  // Known upstream bug (lmstudio-bug-tracker #1371): some macOS installs read
+  // ~/.cache/lm-studio/mcp.json instead and never create ~/.lmstudio. Prefer
+  // the documented path, but if it's absent and the cache dir is the one that
+  // exists, write there so we don't leave a file LM Studio never reads.
+  const lmStudioStd = join(home, ".lmstudio", "mcp.json")
+  const lmStudioCache = join(home, ".cache", "lm-studio", "mcp.json")
+  const lmStudioConfig =
+    os === "darwin" && !existsSync(join(home, ".lmstudio")) && existsSync(join(home, ".cache", "lm-studio"))
+      ? lmStudioCache
+      : lmStudioStd
 
   // ----- Warp -----
   // Global MCP config at ~/.warp/.mcp.json, `mcpServers` object map. Global
@@ -262,9 +272,10 @@ export function builtInAgents(): AgentDefinition[] {
       detect: [
         { type: "app-bundle", mac: "LM Studio", win: "LM Studio/LM Studio.exe", linux: "lm-studio" },
         { type: "path-exists", path: join(home, ".lmstudio") },
+        { type: "path-exists", path: join(home, ".cache", "lm-studio") },
       ],
       install: { type: "json-merge", path: lmStudioConfig },
-      notes: "LM Studio's mcp.json follows Cursor's `mcpServers` notation.",
+      notes: "LM Studio's mcp.json follows Cursor's `mcpServers` notation. On macOS, falls back to ~/.cache/lm-studio/mcp.json when that's the dir LM Studio actually uses (upstream bug #1371).",
     },
     {
       id: "warp",

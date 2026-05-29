@@ -4,6 +4,7 @@ import { mkdtemp, rm, readFile, writeFile, mkdir } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import {
+  builtInAgents,
   installAgent,
   loadAgents,
   mcpCommandNpx,
@@ -269,6 +270,39 @@ test("LM Studio, Warp, and Jan are registered with the expected install targets"
     }
   })
 })
+
+test(
+  "LM Studio install path falls back to ~/.cache/lm-studio on macOS when ~/.lmstudio is absent (bug #1371)",
+  { skip: process.platform !== "darwin" },
+  async () => {
+    await withConfigDir(async (configDir) => {
+      const prevHome = process.env.HOME
+      process.env.HOME = configDir
+      try {
+        const lmPath = () => {
+          const def = builtInAgents().find((a) => a.id === "lm-studio")
+          assert.ok(def, "lm-studio should be registered")
+          return (def!.install as { path: string }).path
+        }
+        // Cache dir exists, documented dir does not → target the cache path.
+        await mkdir(join(configDir, ".cache", "lm-studio"), { recursive: true })
+        assert.ok(
+          lmPath().endsWith(join(".cache", "lm-studio", "mcp.json")),
+          "should target the cache path when only it exists",
+        )
+        // Once ~/.lmstudio exists, prefer the documented path.
+        await mkdir(join(configDir, ".lmstudio"), { recursive: true })
+        assert.ok(
+          lmPath().endsWith(join(".lmstudio", "mcp.json")),
+          "should prefer the documented path once it exists",
+        )
+      } finally {
+        if (prevHome === undefined) delete process.env.HOME
+        else process.env.HOME = prevHome
+      }
+    })
+  },
+)
 
 test("readMcp tolerates JSONC (comments + trailing commas)", async () => {
   await withConfigDir(async (configDir) => {
