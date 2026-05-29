@@ -192,8 +192,13 @@ export function builtInAgents(): AgentDefinition[] {
       name: "Gemini CLI",
       configPathHint: geminiFallback,
       detect: { type: "command", name: "gemini" },
-      install: { type: "cli-mcp", binary: "gemini", jsonFallbackPath: geminiFallback },
-      notes: "Installed via `gemini mcp add`; falls back to ~/.gemini/settings.json when the CLI isn't on PATH.",
+      install: {
+        type: "cli-mcp",
+        binary: "gemini",
+        scopeFlags: ["-s", "user"],
+        jsonFallbackPath: geminiFallback,
+      },
+      notes: "Installed via `gemini mcp add -s user` (user scope → ~/.gemini/settings.json). Without -s user the CLI defaults to project scope and writes ./.gemini/settings.json in the cwd. Falls back to ~/.gemini/settings.json when the CLI isn't on PATH.",
     },
     {
       id: "amp",
