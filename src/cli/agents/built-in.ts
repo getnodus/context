@@ -176,8 +176,13 @@ export function builtInAgents(): AgentDefinition[] {
         { type: "command", name: "code" },
         { type: "path-exists", path: vscodeUserDir },
       ],
-      install: { type: "json-merge", path: vscodeMcpConfig, keyPath: ["servers"] },
-      notes: "VS Code's MCP file is mcp.json with the `servers` key (not `mcpServers`).",
+      install: {
+        type: "json-merge",
+        path: vscodeMcpConfig,
+        keyPath: ["servers"],
+        entryShape: "vscode",
+      },
+      notes: "VS Code's MCP file is mcp.json with the `servers` key (not `mcpServers`); entries carry an explicit `type: \"stdio\"`.",
     },
     {
       id: "roo-code",
