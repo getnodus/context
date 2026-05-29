@@ -6,6 +6,11 @@ All notable changes to `@getnodus/context` are documented here. Format roughly f
 
 <!-- New entries land here. Group under topical subheadings (e.g. *Agent registry*, *Self-maintaining memory*) to match past releases. -->
 
+### Agent registry
+
+- **Gemini CLI now installs at user scope.** `gemini mcp add` defaults to *project* scope, which wrote the server into a `./.gemini/settings.json` in whatever directory `setup` happened to run from. The registry now passes `-s user`, so the server is registered globally in `~/.gemini/settings.json` — matching the JSON fallback and the behavior every other agent gives.
+- **VS Code entries carry an explicit `type: "stdio"`.** VS Code infers the transport today, but its MCP schema marks `type` as required; the new `vscode` entry shape writes it so the registration stays valid against stricter validation.
+
 ### Documentation
 
 - **Network use table.** README now lists each outbound call, when it fires, and the matching env-var kill switch or control path. The update-check and verify rows note the exact triggers (1.5s timeout; once at MCP-server start; 7-day stale-on-read background verify, on in the MCP server and off by default for library/CLI callers).

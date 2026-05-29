@@ -176,8 +176,13 @@ export function builtInAgents(): AgentDefinition[] {
         { type: "command", name: "code" },
         { type: "path-exists", path: vscodeUserDir },
       ],
-      install: { type: "json-merge", path: vscodeMcpConfig, keyPath: ["servers"] },
-      notes: "VS Code's MCP file is mcp.json with the `servers` key (not `mcpServers`).",
+      install: {
+        type: "json-merge",
+        path: vscodeMcpConfig,
+        keyPath: ["servers"],
+        entryShape: "vscode",
+      },
+      notes: "VS Code's MCP file is mcp.json with the `servers` key (not `mcpServers`); entries carry an explicit `type: \"stdio\"`.",
     },
     {
       id: "roo-code",
@@ -192,8 +197,13 @@ export function builtInAgents(): AgentDefinition[] {
       name: "Gemini CLI",
       configPathHint: geminiFallback,
       detect: { type: "command", name: "gemini" },
-      install: { type: "cli-mcp", binary: "gemini", jsonFallbackPath: geminiFallback },
-      notes: "Installed via `gemini mcp add`; falls back to ~/.gemini/settings.json when the CLI isn't on PATH.",
+      install: {
+        type: "cli-mcp",
+        binary: "gemini",
+        scopeFlags: ["-s", "user"],
+        jsonFallbackPath: geminiFallback,
+      },
+      notes: "Installed via `gemini mcp add -s user` (user scope → ~/.gemini/settings.json). Without -s user the CLI defaults to project scope and writes ./.gemini/settings.json in the cwd. Falls back to ~/.gemini/settings.json when the CLI isn't on PATH.",
     },
     {
       id: "amp",

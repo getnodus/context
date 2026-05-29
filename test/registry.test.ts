@@ -189,6 +189,43 @@ test("Zed-style keyPath ('context_servers') is honoured", async () => {
   })
 })
 
+test("VS Code entryShape writes `type: stdio` under `servers` and round-trips", async () => {
+  await withConfigDir(async (configDir) => {
+    const mcpFile = join(configDir, "vscode-mcp.json")
+    const def: AgentDefinition = {
+      id: "vscode-clone",
+      name: "VS Code-clone",
+      configPathHint: mcpFile,
+      detect: { type: "always" },
+      install: { type: "json-merge", path: mcpFile, keyPath: ["servers"], entryShape: "vscode" },
+    }
+    const resolved = mkResolved(def)
+    const cmd = mcpCommandNpx()
+    await installAgent(resolved, cmd)
+
+    const raw = JSON.parse(await readFile(mcpFile, "utf8"))
+    const entry = raw.servers?.["nodus-context"]
+    assert.ok(entry, "entry should land under servers")
+    assert.equal(entry.type, "stdio", "VS Code entries carry an explicit type: stdio")
+    assert.equal(entry.command, cmd.command)
+    assert.deepEqual(entry.args, cmd.args)
+    assert.equal(raw.mcpServers, undefined)
+
+    // Reads back as the canonical shape (the `type` discriminator is stripped).
+    const read = await readMcp(resolved)
+    assert.equal(read?.command, cmd.command)
+    assert.deepEqual(read?.args, cmd.args)
+
+    // Re-install with same command compares on the canonical shape.
+    const second = await installAgent(resolved, cmd)
+    assert.equal(second.status, "already-installed")
+
+    assert.equal(await uninstallAgent(resolved), true)
+    const after = JSON.parse(await readFile(mcpFile, "utf8"))
+    assert.equal(after.servers?.["nodus-context"], undefined)
+  })
+})
+
 test("readMcp tolerates JSONC (comments + trailing commas)", async () => {
   await withConfigDir(async (configDir) => {
     const mcpFile = join(configDir, "jsonc-settings.json")
