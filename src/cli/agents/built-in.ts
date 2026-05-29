@@ -130,6 +130,13 @@ export function builtInAgents(): AgentDefinition[] {
         : join(home, ".local", "share", "Jan", "data")
   const janConfig = join(janDataDir, "mcp_config.json")
 
+  // ----- BoltAI -----
+  // Native macOS app (no Windows/Linux build). Local MCP servers live in a
+  // plain JSON file at ~/.boltai/mcp.json — a home dotfile, NOT under
+  // ~/Library/Application Support — using the canonical `mcpServers` object
+  // map. (Remote servers sync via BoltAI Cloud; we target the local file.)
+  const boltaiConfig = join(home, ".boltai", "mcp.json")
+
   return [
     {
       id: "claude-desktop",
@@ -299,6 +306,17 @@ export function builtInAgents(): AgentDefinition[] {
       ],
       install: { type: "json-merge", path: janConfig, entryShape: "jan" },
       notes: "Jan's mcp_config.json uses `mcpServers`; entries get `active: true` so the server is enabled without a GUI toggle. Quit Jan before installing so it doesn't overwrite the file.",
+    },
+    {
+      id: "boltai",
+      name: "BoltAI",
+      configPathHint: boltaiConfig,
+      detect: [
+        { type: "app-bundle", mac: "BoltAI" },
+        { type: "path-exists", path: join(home, ".boltai") },
+      ],
+      install: { type: "json-merge", path: boltaiConfig },
+      notes: "BoltAI's local MCP servers live in ~/.boltai/mcp.json (`mcpServers`). macOS-only native app; quit and relaunch to pick up the new server.",
     },
   ]
 }
