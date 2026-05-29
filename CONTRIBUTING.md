@@ -10,7 +10,9 @@ If you're not sure what to pick up:
 - **Add a new backend.** Bigger but well-scoped. See *Adding a new backend* below.
 - **Browse [open issues](https://github.com/getnodus/context/issues)**. Issues labeled `good first issue` or `help wanted` are explicitly marked.
 
-Before you start anything non-trivial, open or comment on an issue — saves you from finishing something that has already been started, or that conflicts with a design call we'd want to discuss first.
+Have an idea rather than a bug? **[Discussions](https://github.com/getnodus/context/discussions) is the front door** — feature requests and "I wish it could…" go in [Ideas](https://github.com/getnodus/context/discussions/categories/ideas) (where the community can vote them up), and usage questions go in [Q&A](https://github.com/getnodus/context/discussions/categories/q-a). We promote popular, well-scoped ideas into tracked issues — so the issue tracker stays a list of accepted, actionable work.
+
+Before you start anything non-trivial, open or comment on an issue (or an Ideas discussion) — saves you from finishing something that has already been started, or that conflicts with a design call we'd want to discuss first.
 
 ## Branching, commits, PRs
 
