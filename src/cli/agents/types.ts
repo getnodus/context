@@ -89,10 +89,12 @@ export interface InstallJsonMerge {
    * Shape of the per-server entry value. `standard` (default) writes the
    * canonical `{command, args, env?}` used by Claude/Cursor/Cline/Zed/etc.
    * `opencode` writes OpenCode's variant: `{type: "local", command:
-   * [cmd, ...args], enabled: true}`. Read paths inverse-transform so
-   * `readMcp` returns the canonical shape regardless.
+   * [cmd, ...args], enabled: true}`. `vscode` writes the canonical shape
+   * plus an explicit `{type: "stdio"}` discriminator, which VS Code's MCP
+   * schema marks as required. Read paths inverse-transform so `readMcp`
+   * returns the canonical shape regardless.
    */
-  entryShape?: "standard" | "opencode"
+  entryShape?: "standard" | "opencode" | "vscode"
 }
 
 /**

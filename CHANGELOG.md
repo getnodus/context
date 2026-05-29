@@ -9,6 +9,7 @@ All notable changes to `@getnodus/context` are documented here. Format roughly f
 ### Agent registry
 
 - **Gemini CLI now installs at user scope.** `gemini mcp add` defaults to *project* scope, which wrote the server into a `./.gemini/settings.json` in whatever directory `setup` happened to run from. The registry now passes `-s user`, so the server is registered globally in `~/.gemini/settings.json` — matching the JSON fallback and the behavior every other agent gives.
+- **VS Code entries carry an explicit `type: "stdio"`.** VS Code infers the transport today, but its MCP schema marks `type` as required; the new `vscode` entry shape writes it so the registration stays valid against stricter validation.
 
 ### Documentation
 

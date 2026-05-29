@@ -208,6 +208,15 @@ function toEntryShape(cmd: McpCommand, shape: InstallJsonMerge["entryShape"]): u
     if (cmd.env) entry.environment = cmd.env
     return entry
   }
+  if (shape === "vscode") {
+    const entry: Record<string, unknown> = {
+      type: "stdio",
+      command: cmd.command,
+      args: cmd.args,
+    }
+    if (cmd.env) entry.env = cmd.env
+    return entry
+  }
   return cmd
 }
 
@@ -228,6 +237,15 @@ function fromEntryShape(
     const parts = o.command as string[]
     const [command, ...args] = parts
     return { command, args, ...(o.environment ? { env: o.environment } : {}) }
+  }
+  if (shape === "vscode") {
+    // Tolerate entries with or without the explicit `type: "stdio"` (older
+    // installs and hand-edited files may omit it); strip it on the way back
+    // to the canonical shape so command comparison stays clean.
+    const o = raw as { command?: unknown; args?: unknown; env?: Record<string, string> }
+    if (typeof o.command !== "string") return undefined
+    const args = Array.isArray(o.args) ? (o.args as string[]) : []
+    return { command: o.command, args, ...(o.env ? { env: o.env } : {}) }
   }
   return raw as McpCommand
 }
