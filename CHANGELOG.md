@@ -8,7 +8,7 @@ All notable changes to `@getnodus/context` are documented here. Format roughly f
 
 ### Documentation
 
-- **Network use table.** README now lists each outbound call, when it fires, and the matching env-var kill switch or control path.
+- **Network use table.** README now lists each outbound call, when it fires, and the matching env-var kill switch or control path. The update-check and verify rows note the exact triggers (1.5s timeout; once at MCP-server start; 7-day stale-on-read background verify, on in the MCP server and off by default for library/CLI callers).
 
 ## 0.1.1 — 2026-05-28
 
