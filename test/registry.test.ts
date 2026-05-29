@@ -260,6 +260,54 @@ test("Jan entryShape writes `active: true` and round-trips to canonical", async 
   })
 })
 
+test("5ire entryShape writes `isActive: true` and round-trips to canonical", async () => {
+  await withConfigDir(async (configDir) => {
+    const mcpFile = join(configDir, "5ire_mcp.json")
+    const def: AgentDefinition = {
+      id: "5ire-clone",
+      name: "5ire-clone",
+      configPathHint: mcpFile,
+      detect: { type: "always" },
+      install: { type: "json-merge", path: mcpFile, entryShape: "5ire" },
+    }
+    const resolved = mkResolved(def)
+    const cmd = mcpCommandNpx()
+    await installAgent(resolved, cmd)
+
+    const raw = JSON.parse(await readFile(mcpFile, "utf8"))
+    const entry = raw.mcpServers?.["nodus-context"]
+    assert.ok(entry, "entry should land under mcpServers")
+    assert.equal(entry.isActive, true, "5ire entries are auto-connected with isActive: true")
+    assert.equal(entry.command, cmd.command)
+    assert.deepEqual(entry.args, cmd.args)
+
+    // Reads back canonical (the `isActive` flag is stripped).
+    const read = await readMcp(resolved)
+    assert.equal(read?.command, cmd.command)
+    assert.deepEqual(read?.args, cmd.args)
+
+    const second = await installAgent(resolved, cmd)
+    assert.equal(second.status, "already-installed")
+
+    assert.equal(await uninstallAgent(resolved), true)
+  })
+})
+
+test("5ire is registered as a json-merge agent with the 5ire entry shape", async () => {
+  await withConfigDir(async () => {
+    const agents = await loadAgents()
+    const rec = agents.find((a) => a.definition.id === "5ire")
+    assert.ok(rec, "5ire should be a registered built-in")
+    const install = rec!.definition.install
+    assert.equal(install.type, "json-merge")
+    assert.ok(
+      (install as { path: string }).path.endsWith("mcp.json"),
+      "5ire should install into mcp.json",
+    )
+    assert.equal((install as { entryShape?: string }).entryShape, "5ire")
+  })
+})
+
 test("LM Studio, Warp, and Jan are registered with the expected install targets", async () => {
   await withConfigDir(async () => {
     const agents = await loadAgents()

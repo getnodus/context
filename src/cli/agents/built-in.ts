@@ -130,6 +130,19 @@ export function builtInAgents(): AgentDefinition[] {
         : join(home, ".local", "share", "Jan", "data")
   const janConfig = join(janDataDir, "mcp_config.json")
 
+  // ----- 5ire -----
+  // Electron app; MCP servers live at <userData>/mcp.json under the canonical
+  // `mcpServers` object map. (Chat history / knowledge base use SQLite, but
+  // MCP config is this JSON file.) 5ire only auto-connects servers flagged
+  // `isActive: true`, so entries carry that flag (handled by entryShape "5ire").
+  const fiveireDataDir =
+    os === "darwin"
+      ? join(home, "Library", "Application Support", "5ire")
+      : os === "win32"
+        ? join(process.env.APPDATA ?? home, "5ire")
+        : join(home, ".config", "5ire")
+  const fiveireConfig = join(fiveireDataDir, "mcp.json")
+
   return [
     {
       id: "claude-desktop",
@@ -299,6 +312,17 @@ export function builtInAgents(): AgentDefinition[] {
       ],
       install: { type: "json-merge", path: janConfig, entryShape: "jan" },
       notes: "Jan's mcp_config.json uses `mcpServers`; entries get `active: true` so the server is enabled without a GUI toggle. Quit Jan before installing so it doesn't overwrite the file.",
+    },
+    {
+      id: "5ire",
+      name: "5ire",
+      configPathHint: fiveireConfig,
+      detect: [
+        { type: "app-bundle", mac: "5ire", win: "5ire/5ire.exe", linux: "5ire" },
+        { type: "path-exists", path: fiveireDataDir },
+      ],
+      install: { type: "json-merge", path: fiveireConfig, entryShape: "5ire" },
+      notes: "5ire's mcp.json uses `mcpServers`; entries get `isActive: true` so 5ire auto-connects the server (it only connects active ones). Quit 5ire before installing so it doesn't overwrite the file.",
     },
   ]
 }

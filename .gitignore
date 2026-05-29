@@ -4,9 +4,8 @@ coverage/
 *.log
 *.tsbuildinfo
 .DS_Store
-.env
-.env.local
 *.mcpb
 .context/
 .idea/
 .vscode/
+config.bat

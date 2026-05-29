@@ -92,11 +92,12 @@ export interface InstallJsonMerge {
    * [cmd, ...args], enabled: true}`. `vscode` writes the canonical shape
    * plus an explicit `{type: "stdio"}` discriminator, which VS Code's MCP
    * schema marks as required. `jan` writes the canonical shape plus
-   * `{active: true}` so Jan enables the server without a GUI toggle. Read
-   * paths inverse-transform so `readMcp` returns the canonical shape
-   * regardless.
+   * `{active: true}` so Jan enables the server without a GUI toggle. `5ire`
+   * writes the canonical shape plus `{isActive: true}` so 5ire auto-connects
+   * the server (it only connects servers flagged active). Read paths
+   * inverse-transform so `readMcp` returns the canonical shape regardless.
    */
-  entryShape?: "standard" | "opencode" | "vscode" | "jan"
+  entryShape?: "standard" | "opencode" | "vscode" | "jan" | "5ire"
 }
 
 /**
