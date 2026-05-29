@@ -226,6 +226,15 @@ function toEntryShape(cmd: McpCommand, shape: InstallJsonMerge["entryShape"]): u
     if (cmd.env) entry.env = cmd.env
     return entry
   }
+  if (shape === "5ire") {
+    const entry: Record<string, unknown> = {
+      command: cmd.command,
+      args: cmd.args,
+      isActive: true,
+    }
+    if (cmd.env) entry.env = cmd.env
+    return entry
+  }
   return cmd
 }
 
@@ -258,6 +267,13 @@ function fromEntryShape(
   }
   if (shape === "jan") {
     // Jan adds an `active` flag; strip it back to the canonical shape.
+    const o = raw as { command?: unknown; args?: unknown; env?: Record<string, string> }
+    if (typeof o.command !== "string") return undefined
+    const args = Array.isArray(o.args) ? (o.args as string[]) : []
+    return { command: o.command, args, ...(o.env ? { env: o.env } : {}) }
+  }
+  if (shape === "5ire") {
+    // 5ire adds an `isActive` flag; strip it back to the canonical shape.
     const o = raw as { command?: unknown; args?: unknown; env?: Record<string, string> }
     if (typeof o.command !== "string") return undefined
     const args = Array.isArray(o.args) ? (o.args as string[]) : []
