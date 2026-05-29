@@ -6,6 +6,10 @@ All notable changes to `@getnodus/context` are documented here. Format roughly f
 
 <!-- New entries land here. Group under topical subheadings (e.g. *Agent registry*, *Self-maintaining memory*) to match past releases. -->
 
+### Documentation
+
+- **Network use table.** README now lists each outbound call, when it fires, and the matching env-var kill switch or control path.
+
 ## 0.1.1 — 2026-05-28
 
 A small follow-up to 0.1.0 that broadens client coverage and tightens the memory-discipline contract agents see at startup. 0.1.0 was prepped but never published, so this is the first release on npm after 0.0.12 — the 0.1.0 notes below still apply.

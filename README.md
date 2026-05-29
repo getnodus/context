@@ -382,9 +382,12 @@ context profile add my --type=module --path=my-backend-pkg
 
 `@getnodus/context` is a local-first tool. The only outbound calls it makes on its own behalf are:
 
-- **Update check** — once every 24 hours, a request to `https://registry.npmjs.org/@getnodus/context/latest` to compare your installed version to the latest published. 1.5s timeout; failures are silent. Disable with `NODUS_DISABLE_UPDATE_CHECK=1`. Skipped automatically in CI.
-- **Verify blocks** — only fire when an entry declares one. `kind: url` hits the URL you specified; `kind: repo` hits `https://api.github.com/repos/<owner>/<name>`; `kind: path` is local-only. Bounded by `NODUS_VERIFY_TIMEOUT_MS` (8s default; 3s for inline verify-on-write). Disable background re-checks with `NODUS_DISABLE_BACKGROUND_VERIFY=1`.
-- **HTTP backend / ack sync** — only when you configure an `http` or `mirror` profile. All traffic goes to the server URL you provided.
+| Outbound call | What it does | When it fires | Disable / control |
+| --- | --- | --- | --- |
+| Update check | Requests `https://registry.npmjs.org/@getnodus/context/latest` to compare your installed version to the latest published version. | At most once every 24 hours when the cache is stale. Skipped automatically in CI and dev builds. | Set `NODUS_DISABLE_UPDATE_CHECK=1`. |
+| Verify blocks | For `verify:` specs, `kind: url` fetches the URL you specified and `kind: repo` checks `https://api.github.com/repos/<owner>/<name>`. `kind: path` is local-only. | When you explicitly run verify, when a write performs inline verification, or when stale-on-read background verification is enabled by the caller. | Set `NODUS_DISABLE_BACKGROUND_VERIFY=1` to suppress stale-on-read background checks. Set `NODUS_VERIFY_TIMEOUT_MS` to change the normal timeout; inline verify-on-write still caps at 3s. |
+| HTTP / mirror backend sync | Sends reads, writes, and ack sync to the server URL in your configured profile. | Only after you configure an `http` or `mirror` profile. Local profiles do not use this path. | Switch to a `local` profile or remove the server URL; there is no background env-var kill switch because this is the selected storage backend. |
+| Optional Ollama embeddings | Sends text to the configured Ollama embeddings endpoint, defaulting to `http://127.0.0.1:11434/api/embeddings`, to enable semantic search. | Only when you opt in with `NODUS_EMBEDDING_PROVIDER=ollama` and run search with an embedding-enabled local backend. | Unset `NODUS_EMBEDDING_PROVIDER`. `NODUS_EMBEDDING_URL`, `NODUS_EMBEDDING_MODEL`, and `NODUS_EMBEDDING_DIM` only customize the endpoint/model. |
 
 No telemetry. No analytics. Entry contents never leave the local backend unless you configure a remote profile.
 
