@@ -2,6 +2,7 @@ import { homedir, platform } from "node:os"
 import { join, dirname } from "node:path"
 import { readFile, writeFile, mkdir, stat } from "node:fs/promises"
 import { spawn } from "node:child_process"
+import { parseDocument, isSeq, isMap } from "yaml"
 import { loadConfig } from "../../config/index.js"
 import { builtInAgents } from "./built-in.js"
 import {
@@ -10,6 +11,7 @@ import {
   InstallSpec,
   InstallJsonMerge,
   InstallCliMcp,
+  InstallYamlMerge,
 } from "./types.js"
 
 export const MCP_KEY = "nodus-context"
@@ -151,6 +153,8 @@ async function readByInstall(spec: InstallSpec): Promise<McpCommand | undefined>
       return readJsonMerge(spec)
     case "cli-mcp":
       return readCliMcp(spec)
+    case "yaml-merge":
+      return readYamlMerge(spec)
   }
 }
 
@@ -170,6 +174,8 @@ async function writeByInstall(
       return writeJsonMerge(spec, cmd)
     case "cli-mcp":
       return writeCliMcp(spec, cmd)
+    case "yaml-merge":
+      return writeYamlMerge(spec, cmd)
   }
 }
 
@@ -183,11 +189,13 @@ async function removeByInstall(spec: InstallSpec): Promise<boolean> {
       return removeJsonMerge(spec)
     case "cli-mcp":
       return removeCliMcp(spec)
+    case "yaml-merge":
+      return removeYamlMerge(spec)
   }
 }
 
 function configPathFor(spec: InstallSpec): string | undefined {
-  if (spec.type === "json-merge") return expand(spec.path)
+  if (spec.type === "json-merge" || spec.type === "yaml-merge") return expand(spec.path)
   return undefined
 }
 
@@ -319,6 +327,142 @@ async function removeJsonMerge(spec: InstallJsonMerge): Promise<boolean> {
   if (!(MCP_KEY in map)) return false
   delete map[MCP_KEY]
   await writeJsonConfig(path, data)
+  return true
+}
+
+// --------------------------- yaml-merge implementation ---------------------------
+//
+// Continue and Goose store MCP servers in YAML, alongside the user's
+// models/rules/etc. We merge through the `yaml` Document API so unrelated
+// keys and comments survive. The two clients disagree on collection style:
+// Continue uses a sequence keyed by an inner `name`; Goose uses a map keyed
+// by server name with renamed fields (`cmd`, plus type/enabled/timeout).
+
+/** Default collection key when a yaml-merge spec omits `keyPath`. */
+function yamlKeyPath(spec: InstallYamlMerge): string[] {
+  return spec.keyPath ?? ["mcpServers"]
+}
+
+/** Canonical command → the plain object we write under the collection. */
+function toYamlEntry(spec: InstallYamlMerge, cmd: McpCommand): Record<string, unknown> {
+  if (spec.entryShape === "goose") {
+    const entry: Record<string, unknown> = {
+      type: "stdio",
+      cmd: cmd.command,
+      args: cmd.args,
+      enabled: true,
+      timeout: 300,
+    }
+    if (cmd.env) entry.envs = cmd.env
+    return entry
+  }
+  // continue: the server name lives inside the entry.
+  const entry: Record<string, unknown> = {
+    name: MCP_KEY,
+    command: cmd.command,
+    args: cmd.args,
+  }
+  if (cmd.env) entry.env = cmd.env
+  return entry
+}
+
+/** Inverse of `toYamlEntry`, operating on a plain JS value from `toJS()`. */
+function fromYamlEntry(spec: InstallYamlMerge, raw: unknown): McpCommand | undefined {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined
+  if (spec.entryShape === "goose") {
+    const o = raw as { cmd?: unknown; args?: unknown; envs?: Record<string, string> }
+    if (typeof o.cmd !== "string") return undefined
+    const args = Array.isArray(o.args) ? (o.args as string[]) : []
+    return { command: o.cmd, args, ...(o.envs ? { env: o.envs } : {}) }
+  }
+  const o = raw as { command?: unknown; args?: unknown; env?: Record<string, string> }
+  if (typeof o.command !== "string") return undefined
+  const args = Array.isArray(o.args) ? (o.args as string[]) : []
+  return { command: o.command, args, ...(o.env ? { env: o.env } : {}) }
+}
+
+/** Pull our existing entry (as canonical command) out of a parsed document. */
+function readYamlEntry(
+  data: Record<string, unknown> | null,
+  spec: InstallYamlMerge,
+): McpCommand | undefined {
+  if (!data || typeof data !== "object") return undefined
+  const container = navigatePlain(data, yamlKeyPath(spec))
+  if (spec.entryShape === "continue") {
+    if (!Array.isArray(container)) return undefined
+    const item = container.find(
+      (e) => e && typeof e === "object" && (e as Record<string, unknown>).name === MCP_KEY,
+    )
+    return fromYamlEntry(spec, item)
+  }
+  if (!container || typeof container !== "object" || Array.isArray(container)) return undefined
+  return fromYamlEntry(spec, (container as Record<string, unknown>)[MCP_KEY])
+}
+
+async function readYamlMerge(spec: InstallYamlMerge): Promise<McpCommand | undefined> {
+  const raw = await readTextConfig(expand(spec.path))
+  if (!raw.trim()) return undefined
+  const doc = parseYaml(raw, expand(spec.path))
+  return readYamlEntry(doc.toJS() as Record<string, unknown> | null, spec)
+}
+
+async function writeYamlMerge(
+  spec: InstallYamlMerge,
+  cmd: McpCommand,
+): Promise<InstallResult> {
+  const path = expand(spec.path)
+  const raw = await readTextConfig(path)
+  const doc = parseYaml(raw, path)
+  const keyPath = yamlKeyPath(spec)
+
+  const existing = readYamlEntry(doc.toJS() as Record<string, unknown> | null, spec)
+  let status: InstallResult["status"]
+  if (!existing) status = "installed"
+  else if (sameCommand(existing, cmd)) status = "already-installed"
+  else status = "updated"
+
+  const entry = toYamlEntry(spec, cmd)
+  if (spec.entryShape === "continue") {
+    const seq = doc.getIn(keyPath)
+    if (!isSeq(seq)) {
+      doc.setIn(keyPath, [entry])
+    } else {
+      const idx = seq.items.findIndex(
+        (it) => isMap(it) && String(it.get("name")) === MCP_KEY,
+      )
+      const node = doc.createNode(entry)
+      if (idx >= 0) seq.items[idx] = node
+      else seq.items.push(node)
+    }
+  } else {
+    doc.setIn([...keyPath, MCP_KEY], entry)
+  }
+
+  await writeTextConfig(path, String(doc))
+  return { status }
+}
+
+async function removeYamlMerge(spec: InstallYamlMerge): Promise<boolean> {
+  const path = expand(spec.path)
+  const raw = await readTextConfig(path)
+  if (!raw.trim()) return false
+  const doc = parseYaml(raw, path)
+  const keyPath = yamlKeyPath(spec)
+
+  if (spec.entryShape === "continue") {
+    const seq = doc.getIn(keyPath)
+    if (!isSeq(seq)) return false
+    const idx = seq.items.findIndex(
+      (it) => isMap(it) && String(it.get("name")) === MCP_KEY,
+    )
+    if (idx < 0) return false
+    seq.items.splice(idx, 1)
+  } else {
+    if (!doc.hasIn([...keyPath, MCP_KEY])) return false
+    doc.deleteIn([...keyPath, MCP_KEY])
+  }
+
+  await writeTextConfig(path, String(doc))
   return true
 }
 
@@ -569,6 +713,49 @@ function stripJsonc(input: string): string {
 async function writeJsonConfig(path: string, data: Record<string, unknown>): Promise<void> {
   await mkdir(dirname(path), { recursive: true })
   await writeFile(path, JSON.stringify(data, null, 2) + "\n", "utf8")
+}
+
+/** Read a text file, returning "" when it doesn't exist (matches JSON read). */
+async function readTextConfig(path: string): Promise<string> {
+  try {
+    return await readFile(path, "utf8")
+  } catch (e: any) {
+    if (e.code === "ENOENT") return ""
+    throw new Error(`could not read ${path}: ${e.message}`)
+  }
+}
+
+async function writeTextConfig(path: string, contents: string): Promise<void> {
+  await mkdir(dirname(path), { recursive: true })
+  await writeFile(path, contents, "utf8")
+}
+
+/**
+ * Parse YAML into a comment-preserving Document. Surfaces a clear error on
+ * malformed input rather than silently corrupting the user's file on write,
+ * mirroring how `readJsonConfig` refuses to guess past a syntax error.
+ */
+function parseYaml(raw: string, path: string) {
+  const doc = parseDocument(raw)
+  if (doc.errors.length > 0) {
+    throw new Error(
+      `could not parse ${path}: ${doc.errors[0].message}. Fix the YAML syntax error first.`,
+    )
+  }
+  return doc
+}
+
+/**
+ * Like `navigate`, but read-only and tolerant of arrays (YAML collections
+ * may be sequences). Returns the value at `keys` or undefined.
+ */
+function navigatePlain(root: Record<string, unknown>, keys: string[]): unknown {
+  let node: unknown = root
+  for (const k of keys) {
+    if (!node || typeof node !== "object") return undefined
+    node = (node as Record<string, unknown>)[k]
+  }
+  return node
 }
 
 function navigate(

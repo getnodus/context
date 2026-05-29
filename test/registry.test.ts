@@ -3,6 +3,7 @@ import assert from "node:assert/strict"
 import { mkdtemp, rm, readFile, writeFile, mkdir } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { parse as parseYaml } from "yaml"
 import {
   builtInAgents,
   installAgent,
@@ -472,6 +473,196 @@ test("readMcp tolerates JSONC (comments + trailing commas)", async () => {
     const resolved = mkResolved(def)
     const read = await readMcp(resolved)
     assert.equal(read?.command, "npx", "should read entry from JSONC-formatted file")
+  })
+})
+
+test("Continue and Goose are registered as yaml-merge agents", async () => {
+  await withConfigDir(async () => {
+    const agents = await loadAgents()
+
+    const cont = agents.find((a) => a.definition.id === "continue")
+    assert.ok(cont, "continue should be a registered built-in")
+    const contInstall = cont!.definition.install
+    assert.equal(contInstall.type, "yaml-merge")
+    assert.ok(
+      (contInstall as { path: string }).path.endsWith(join(".continue", "config.yaml")),
+      "continue should install into ~/.continue/config.yaml",
+    )
+    assert.equal((contInstall as { entryShape?: string }).entryShape, "continue")
+
+    const goose = agents.find((a) => a.definition.id === "goose")
+    assert.ok(goose, "goose should be a registered built-in")
+    const gooseInstall = goose!.definition.install
+    assert.equal(gooseInstall.type, "yaml-merge")
+    assert.ok(
+      (gooseInstall as { path: string }).path.endsWith(join("goose", "config.yaml")),
+      "goose should install into ~/.config/goose/config.yaml",
+    )
+    assert.deepEqual((gooseInstall as { keyPath?: string[] }).keyPath, ["extensions"])
+    assert.equal((gooseInstall as { entryShape?: string }).entryShape, "goose")
+  })
+})
+
+test("Continue yaml-merge: upsert into mcpServers sequence, preserve siblings + comments", async () => {
+  await withConfigDir(async (configDir) => {
+    const cfg = join(configDir, "continue-config.yaml")
+    // Seed a realistic config.yaml: a comment, an unrelated top-level key,
+    // and an existing MCP server we must not clobber.
+    await writeFile(
+      cfg,
+      [
+        "# My Continue config",
+        "name: my-assistant",
+        "models:",
+        "  - name: gpt",
+        "    provider: openai",
+        "mcpServers:",
+        "  - name: other-server",
+        "    command: other",
+        "    args: []",
+        "",
+      ].join("\n"),
+      "utf8",
+    )
+    const def: AgentDefinition = {
+      id: "continue-clone",
+      name: "Continue-clone",
+      configPathHint: cfg,
+      detect: { type: "always" },
+      install: { type: "yaml-merge", path: cfg, entryShape: "continue" },
+    }
+    const resolved = mkResolved(def)
+    const cmd = mcpCommandNpx()
+    assert.equal((await installAgent(resolved, cmd)).status, "installed")
+
+    const text = await readFile(cfg, "utf8")
+    assert.ok(text.includes("# My Continue config"), "leading comment should survive the merge")
+    const doc = parseYaml(text) as {
+      name: string
+      models: unknown[]
+      mcpServers: Array<{ name: string; command: string; args: string[] }>
+    }
+    assert.equal(doc.name, "my-assistant", "unrelated top-level keys should be preserved")
+    assert.equal(doc.models.length, 1, "existing models should be preserved")
+    const ours = doc.mcpServers.find((s) => s.name === "nodus-context")
+    const other = doc.mcpServers.find((s) => s.name === "other-server")
+    assert.ok(other, "the pre-existing server should still be there")
+    assert.ok(ours, "our server should be appended to the sequence")
+    assert.equal(ours!.command, cmd.command)
+    assert.deepEqual(ours!.args, cmd.args)
+
+    // Reads back canonical.
+    const read = await readMcp(resolved)
+    assert.equal(read?.command, cmd.command)
+    assert.deepEqual(read?.args, cmd.args)
+
+    // Re-install with the same command is a no-op; no duplicate entry.
+    assert.equal((await installAgent(resolved, cmd)).status, "already-installed")
+    const after = parseYaml(await readFile(cfg, "utf8")) as {
+      mcpServers: Array<{ name: string }>
+    }
+    assert.equal(
+      after.mcpServers.filter((s) => s.name === "nodus-context").length,
+      1,
+      "re-install must upsert, not append a duplicate",
+    )
+
+    // Uninstall removes only our entry.
+    assert.equal(await uninstallAgent(resolved), true)
+    const removed = parseYaml(await readFile(cfg, "utf8")) as {
+      mcpServers: Array<{ name: string }>
+    }
+    assert.equal(removed.mcpServers.find((s) => s.name === "nodus-context"), undefined)
+    assert.ok(removed.mcpServers.find((s) => s.name === "other-server"), "sibling must remain")
+    assert.equal(await readMcp(resolved), undefined)
+  })
+})
+
+test("Continue yaml-merge: 'updated' status when the command changes", async () => {
+  await withConfigDir(async (configDir) => {
+    const cfg = join(configDir, "continue-update.yaml")
+    const def: AgentDefinition = {
+      id: "continue-clone-2",
+      name: "Continue-clone-2",
+      configPathHint: cfg,
+      detect: { type: "always" },
+      install: { type: "yaml-merge", path: cfg, entryShape: "continue" },
+    }
+    const resolved = mkResolved(def)
+    assert.equal((await installAgent(resolved, mcpCommandNpx())).status, "installed")
+    const changed = { command: "node", args: ["/abs/dist/mcp/server.js"] }
+    assert.equal((await installAgent(resolved, changed)).status, "updated")
+    const read = await readMcp(resolved)
+    assert.equal(read?.command, "node")
+    assert.deepEqual(read?.args, changed.args)
+  })
+})
+
+test("Goose yaml-merge: extensions map with cmd/type/enabled/timeout, round-trip", async () => {
+  await withConfigDir(async (configDir) => {
+    const cfg = join(configDir, "goose-config.yaml")
+    // Seed an existing extension to prove the map merge preserves it.
+    await writeFile(
+      cfg,
+      ["extensions:", "  developer:", "    type: builtin", "    enabled: true", ""].join("\n"),
+      "utf8",
+    )
+    const def: AgentDefinition = {
+      id: "goose-clone",
+      name: "Goose-clone",
+      configPathHint: cfg,
+      detect: { type: "always" },
+      install: { type: "yaml-merge", path: cfg, keyPath: ["extensions"], entryShape: "goose" },
+    }
+    const resolved = mkResolved(def)
+    const cmd = mcpCommandNpx()
+    assert.equal((await installAgent(resolved, cmd)).status, "installed")
+
+    const doc = parseYaml(await readFile(cfg, "utf8")) as {
+      extensions: Record<string, Record<string, unknown>>
+    }
+    assert.ok(doc.extensions.developer, "the pre-existing extension should be preserved")
+    const entry = doc.extensions["nodus-context"]
+    assert.ok(entry, "our extension should be added under its name")
+    assert.equal(entry.type, "stdio")
+    assert.equal(entry.cmd, cmd.command, "Goose uses `cmd`, not `command`")
+    assert.equal(entry.command, undefined, "no canonical `command` key for Goose")
+    assert.deepEqual(entry.args, cmd.args)
+    assert.equal(entry.enabled, true)
+    assert.equal(entry.timeout, 300)
+
+    // Reads back canonical (cmd → command).
+    const read = await readMcp(resolved)
+    assert.equal(read?.command, cmd.command)
+    assert.deepEqual(read?.args, cmd.args)
+
+    assert.equal((await installAgent(resolved, cmd)).status, "already-installed")
+
+    assert.equal(await uninstallAgent(resolved), true)
+    const after = parseYaml(await readFile(cfg, "utf8")) as {
+      extensions: Record<string, unknown>
+    }
+    assert.equal(after.extensions["nodus-context"], undefined)
+    assert.ok(after.extensions.developer, "sibling extension must remain after uninstall")
+  })
+})
+
+test("yaml-merge install creates the file when absent", async () => {
+  await withConfigDir(async (configDir) => {
+    const cfg = join(configDir, "nested", "fresh.yaml")
+    const def: AgentDefinition = {
+      id: "yaml-fresh",
+      name: "Yaml-fresh",
+      configPathHint: cfg,
+      detect: { type: "always" },
+      install: { type: "yaml-merge", path: cfg, entryShape: "continue" },
+    }
+    const resolved = mkResolved(def)
+    assert.equal(await readMcp(resolved), undefined, "absent file reads as undefined")
+    assert.equal(await uninstallAgent(resolved), false, "uninstall on absent file is a no-op")
+    assert.equal((await installAgent(resolved, mcpCommandNpx())).status, "installed")
+    const read = await readMcp(resolved)
+    assert.equal(read?.command, "npx")
   })
 })
 
