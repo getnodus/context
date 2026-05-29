@@ -226,6 +226,50 @@ test("VS Code entryShape writes `type: stdio` under `servers` and round-trips", 
   })
 })
 
+test("Jan entryShape writes `active: true` and round-trips to canonical", async () => {
+  await withConfigDir(async (configDir) => {
+    const mcpFile = join(configDir, "jan_mcp_config.json")
+    const def: AgentDefinition = {
+      id: "jan-clone",
+      name: "Jan-clone",
+      configPathHint: mcpFile,
+      detect: { type: "always" },
+      install: { type: "json-merge", path: mcpFile, entryShape: "jan" },
+    }
+    const resolved = mkResolved(def)
+    const cmd = mcpCommandNpx()
+    await installAgent(resolved, cmd)
+
+    const raw = JSON.parse(await readFile(mcpFile, "utf8"))
+    const entry = raw.mcpServers?.["nodus-context"]
+    assert.ok(entry, "entry should land under mcpServers")
+    assert.equal(entry.active, true, "Jan entries are enabled with active: true")
+    assert.equal(entry.command, cmd.command)
+    assert.deepEqual(entry.args, cmd.args)
+
+    // Reads back canonical (the `active` flag is stripped).
+    const read = await readMcp(resolved)
+    assert.equal(read?.command, cmd.command)
+    assert.deepEqual(read?.args, cmd.args)
+
+    const second = await installAgent(resolved, cmd)
+    assert.equal(second.status, "already-installed")
+
+    assert.equal(await uninstallAgent(resolved), true)
+  })
+})
+
+test("LM Studio, Warp, and Jan are registered with the expected install targets", async () => {
+  await withConfigDir(async () => {
+    const agents = await loadAgents()
+    for (const id of ["lm-studio", "warp", "jan"]) {
+      const rec = agents.find((a) => a.definition.id === id)
+      assert.ok(rec, `${id} should be a registered built-in`)
+      assert.equal(rec!.definition.install.type, "json-merge")
+    }
+  })
+})
+
 test("readMcp tolerates JSONC (comments + trailing commas)", async () => {
   await withConfigDir(async (configDir) => {
     const mcpFile = join(configDir, "jsonc-settings.json")

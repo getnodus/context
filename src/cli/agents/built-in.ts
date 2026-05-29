@@ -99,6 +99,27 @@ export function builtInAgents(): AgentDefinition[] {
   // `{command, args}`. Handled by entryShape: "opencode".
   const opencodeConfig = join(home, ".config", "opencode", "opencode.json")
 
+  // ----- LM Studio -----
+  // mcp.json at ~/.lmstudio/mcp.json, Cursor-style `mcpServers` object map.
+  const lmStudioConfig = join(home, ".lmstudio", "mcp.json")
+
+  // ----- Warp -----
+  // Global MCP config at ~/.warp/.mcp.json, `mcpServers` object map. Global
+  // servers auto-spawn; project-scoped ones don't, so we target the global file.
+  const warpConfig = join(home, ".warp", ".mcp.json")
+
+  // ----- Jan -----
+  // MCP config lives in Jan's data folder under `mcpServers`. Entries carry an
+  // `active` flag (handled by entryShape: "jan") so the server is enabled
+  // without a GUI toggle.
+  const janDataDir =
+    os === "darwin"
+      ? join(home, "Library", "Application Support", "Jan", "data")
+      : os === "win32"
+        ? join(process.env.APPDATA ?? home, "Jan", "data")
+        : join(home, ".local", "share", "Jan", "data")
+  const janConfig = join(janDataDir, "mcp_config.json")
+
   return [
     {
       id: "claude-desktop",
@@ -233,6 +254,40 @@ export function builtInAgents(): AgentDefinition[] {
         entryShape: "opencode",
       },
       notes: "OpenCode entries use {type, command-as-array, enabled} — handled by entryShape: opencode.",
+    },
+    {
+      id: "lm-studio",
+      name: "LM Studio",
+      configPathHint: lmStudioConfig,
+      detect: [
+        { type: "app-bundle", mac: "LM Studio", win: "LM Studio/LM Studio.exe", linux: "lm-studio" },
+        { type: "path-exists", path: join(home, ".lmstudio") },
+      ],
+      install: { type: "json-merge", path: lmStudioConfig },
+      notes: "LM Studio's mcp.json follows Cursor's `mcpServers` notation.",
+    },
+    {
+      id: "warp",
+      name: "Warp",
+      configPathHint: warpConfig,
+      detect: [
+        { type: "app-bundle", mac: "Warp", win: "Warp/Warp.exe", linux: "warp" },
+        { type: "command", name: "warp" },
+        { type: "path-exists", path: join(home, ".warp") },
+      ],
+      install: { type: "json-merge", path: warpConfig },
+      notes: "Writes Warp's global ~/.warp/.mcp.json (`mcpServers`); global servers auto-spawn. If Warp is running, it may show a one-time approval prompt.",
+    },
+    {
+      id: "jan",
+      name: "Jan",
+      configPathHint: janConfig,
+      detect: [
+        { type: "app-bundle", mac: "Jan", win: "Jan/Jan.exe", linux: "jan" },
+        { type: "path-exists", path: janDataDir },
+      ],
+      install: { type: "json-merge", path: janConfig, entryShape: "jan" },
+      notes: "Jan's mcp_config.json uses `mcpServers`; entries get `active: true` so the server is enabled without a GUI toggle. Quit Jan before installing so it doesn't overwrite the file.",
     },
   ]
 }
