@@ -1,5 +1,14 @@
 blank_issues_enabled: false
 contact_links:
-  - name: Setup help (AI agents)
+  - name: 💡 Ideas & feature requests
+    url: https://github.com/getnodus/context/discussions/categories/ideas
+    about: Propose and vote on what the community wants. Popular ideas get promoted to tracked issues.
+  - name: 🙏 Questions & help
+    url: https://github.com/getnodus/context/discussions/categories/q-a
+    about: Setup help, "how do I…", and usage questions — searchable and answerable.
+  - name: 🗣️ Show & tell / general
+    url: https://github.com/getnodus/context/discussions
+    about: Share what you built, or anything that isn't a bug or a concrete proposal yet.
+  - name: 🤖 Setup help (AI agents)
     url: https://github.com/getnodus/context/blob/main/AGENTS.md
     about: Are you an AI assistant setting this up for someone? Read AGENTS.md first.
