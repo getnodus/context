@@ -99,6 +99,10 @@ export function builtInAgents(): AgentDefinition[] {
   // `{command, args}`. Handled by entryShape: "opencode".
   const opencodeConfig = join(home, ".config", "opencode", "opencode.json")
 
+  // ----- Continue -----
+  // Continue keeps MCP server definitions in ~/.continue/config.json under `mcpServers`.
+  const continueConfig = join(home, ".continue", "config.json")
+
   return [
     {
       id: "claude-desktop",
@@ -127,6 +131,14 @@ export function builtInAgents(): AgentDefinition[] {
       detect: { type: "command", name: "codex" },
       install: { type: "cli-mcp", binary: "codex" },
       notes: "Installed via `codex mcp add` — writes to ~/.codex/config.toml (TOML, single global scope).",
+    },
+    {
+      id: "continue",
+      name: "Continue",
+      configPathHint: continueConfig,
+      detect: { type: "path-exists", path: join(home, ".continue") },
+      install: { type: "json-merge", path: continueConfig },
+      notes: "Installs into Continue's ~/.continue/config.json under `mcpServers`.",
     },
     {
       id: "cursor",

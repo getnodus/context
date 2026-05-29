@@ -8,6 +8,7 @@ import {
   loadAgents,
   mcpCommandNpx,
   readMcp,
+  resolveAgent,
   resolveAgents,
   uninstallAgent,
   type AgentDefinition,
@@ -186,6 +187,36 @@ test("Zed-style keyPath ('context_servers') is honoured", async () => {
     const raw = JSON.parse(await readFile(mcpFile, "utf8"))
     assert.ok(raw.context_servers?.["nodus-context"], "entry should land under context_servers")
     assert.equal(raw.mcpServers, undefined)
+  })
+})
+
+test("Continue built-in detects ~/.continue and round-trips mcpServers", async () => {
+  await withConfigDir(async (configDir) => {
+    const prevHome = process.env.HOME
+    process.env.HOME = configDir
+    try {
+      const records = await loadAgents()
+      const record = records.find((a) => a.definition.id === "continue")
+      assert.ok(record, "Continue should be registered as a built-in agent")
+
+      let resolved = await resolveAgent(record!)
+      assert.equal(resolved.detected, false, "missing ~/.continue should not detect Continue")
+
+      await mkdir(join(configDir, ".continue"), { recursive: true })
+      resolved = await resolveAgent(record!)
+      assert.equal(resolved.detected, true, "existing ~/.continue should detect Continue")
+
+      const installed = await installAgent(resolved, mcpCommandNpx())
+      assert.equal(installed.status, "installed")
+      const raw = JSON.parse(await readFile(join(configDir, ".continue", "config.json"), "utf8"))
+      assert.ok(raw.mcpServers?.["nodus-context"], "entry should land under mcpServers")
+
+      const read = await readMcp(resolved)
+      assert.equal(read?.command, "npx")
+    } finally {
+      if (prevHome === undefined) delete process.env.HOME
+      else process.env.HOME = prevHome
+    }
   })
 })
 

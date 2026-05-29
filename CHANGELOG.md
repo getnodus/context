@@ -6,6 +6,10 @@ All notable changes to `@getnodus/context` are documented here. Format roughly f
 
 <!-- New entries land here. Group under topical subheadings (e.g. *Agent registry*, *Self-maintaining memory*) to match past releases. -->
 
+### Agent registry
+
+- **Continue support.** The built-in registry can now detect Continue and install the Nodus MCP server into `~/.continue/config.json`.
+
 ### Documentation
 
 - **Network use table.** README now lists each outbound call, when it fires, and the matching env-var kill switch or control path.
