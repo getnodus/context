@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pnpm typecheck)",
+      "Bash(npm view *)",
+      "mcp__conductor__GetWorkspaceDiff",
+      "mcp__conductor__AskUserQuestion",
+      "mcp__nodus-context__search_context",
+      "mcp__nodus-context__list_context",
+      "mcp__linear__list_issues",
+      "mcp__github__pull_request_read"
+    ]
+  }
+}
