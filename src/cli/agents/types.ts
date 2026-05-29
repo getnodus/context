@@ -91,10 +91,12 @@ export interface InstallJsonMerge {
    * `opencode` writes OpenCode's variant: `{type: "local", command:
    * [cmd, ...args], enabled: true}`. `vscode` writes the canonical shape
    * plus an explicit `{type: "stdio"}` discriminator, which VS Code's MCP
-   * schema marks as required. Read paths inverse-transform so `readMcp`
-   * returns the canonical shape regardless.
+   * schema marks as required. `jan` writes the canonical shape plus
+   * `{active: true}` so Jan enables the server without a GUI toggle. Read
+   * paths inverse-transform so `readMcp` returns the canonical shape
+   * regardless.
    */
-  entryShape?: "standard" | "opencode" | "vscode"
+  entryShape?: "standard" | "opencode" | "vscode" | "jan"
 }
 
 /**
