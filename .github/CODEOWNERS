@@ -1,13 +1,13 @@
 # Default owner for everything in the repo.
-*                                       @getnodus/maintainers
+*                                       @getnodus/engineering
 
 # Load-bearing files — extra-explicit so review can't be skipped.
-/.github/workflows/release.yml          @getnodus/maintainers
-/.github/workflows/ci.yml               @getnodus/maintainers
-/.github/CODEOWNERS                     @getnodus/maintainers
-/package.json                           @getnodus/maintainers
-/CHANGELOG.md                           @getnodus/maintainers
-/PROTOCOL.md                            @getnodus/maintainers
-/src/backends/                          @getnodus/maintainers
-/src/server/                            @getnodus/maintainers
-/src/mcp/                               @getnodus/maintainers
+/.github/workflows/release.yml          @getnodus/engineering
+/.github/workflows/ci.yml               @getnodus/engineering
+/.github/CODEOWNERS                     @getnodus/engineering
+/package.json                           @getnodus/engineering
+/CHANGELOG.md                           @getnodus/engineering
+/PROTOCOL.md                            @getnodus/engineering
+/src/backends/                          @getnodus/engineering
+/src/server/                            @getnodus/engineering
+/src/mcp/                               @getnodus/engineering
