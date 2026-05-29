@@ -67,7 +67,7 @@ export interface DetectAlwaysTrue {
   type: "always"
 }
 
-export type InstallSpec = InstallJsonMerge | InstallCliMcp
+export type InstallSpec = InstallJsonMerge | InstallCliMcp | InstallYamlMerge
 
 /**
  * Merge a `{ command, args }` entry into a JSON file under a configurable
@@ -98,6 +98,38 @@ export interface InstallJsonMerge {
    * inverse-transform so `readMcp` returns the canonical shape regardless.
    */
   entryShape?: "standard" | "opencode" | "vscode" | "jan" | "5ire"
+}
+
+/**
+ * Merge our entry into a YAML config file, preserving the user's other
+ * keys and any comments. Unlike the JSON clients, the two YAML-config
+ * clients disagree on how servers are collected, so `entryShape` carries
+ * both the collection style and the field-name mapping back to/from our
+ * canonical `{command, args, env?}`:
+ *
+ * - `continue` — Continue's `~/.continue/config.yaml` keeps `mcpServers`
+ *   as a **sequence** of `{name, command, args, env?}`, upserted by `name`.
+ * - `goose` — Goose's `~/.config/goose/config.yaml` keeps `extensions` as
+ *   a **map** of name → `{type: "stdio", cmd, args, enabled, timeout,
+ *   envs?}`, keyed by server name (note `cmd`, not `command`).
+ *
+ * Writes go through the `yaml` Document API so unrelated keys and comments
+ * in the user's file survive the merge.
+ */
+export interface InstallYamlMerge {
+  type: "yaml-merge"
+  /** Absolute path or `~/...`. */
+  path: string
+  /**
+   * Key path to the collection holding servers. Defaults to `["mcpServers"]`
+   * (Continue); Goose uses `["extensions"]`.
+   */
+  keyPath?: string[]
+  /**
+   * Collection style + field mapping. `continue` is a sequence keyed by an
+   * inner `name`; `goose` is a map keyed by server name with renamed fields.
+   */
+  entryShape: "continue" | "goose"
 }
 
 /**

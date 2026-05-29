@@ -77,7 +77,7 @@ Most MCP clients are a one-entry addition to the registry. Walk-through:
 1. Open `src/cli/agents/built-in.ts`. Each entry sets:
    - `id`, `name`, `configPathHint` (where the config file lives, with `~` expansion).
    - `detect` — heuristics that tell `doctor` whether the agent is installed.
-   - `install` — usually `{ kind: "json-merge", file: <path>, key: "mcpServers" }`. Some clients use `context_servers` (Zed) or a non-standard entry shape (OpenCode); see existing entries.
+   - `install` — usually `{ kind: "json-merge", file: <path>, key: "mcpServers" }`. Some clients use `context_servers` (Zed) or a non-standard entry shape (OpenCode); see existing entries. A YAML-config client (Continue, Goose) uses `{ type: "yaml-merge", path, entryShape }` instead, which preserves the user's other keys and comments.
 2. Add a test case in `test/registry.test.ts` covering at least `detect` (true and false) and the install-merge round-trip.
 3. Update `README.md` if the agent needs a special restart instruction.
 4. Update the CHANGELOG under *Unreleased* → *Agent registry*.

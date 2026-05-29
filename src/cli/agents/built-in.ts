@@ -163,6 +163,20 @@ export function builtInAgents(): AgentDefinition[] {
         : join(home, ".config", "Witsy")
   const witsyConfig = join(witsyDataDir, "settings.json")
 
+  // ----- Continue (continue.dev) -----
+  // VS Code / JetBrains extension (+ a `cn` CLI). Unlike every JSON client,
+  // the documented global target is YAML at ~/.continue/config.yaml, where
+  // `mcpServers` is a *sequence* of {name, command, args} — not an object
+  // map. Handled by the `yaml-merge` install kind with entryShape "continue".
+  const continueConfig = join(home, ".continue", "config.yaml")
+
+  // ----- Goose (Block) -----
+  // CLI + desktop app. MCP "extensions" live in YAML at
+  // ~/.config/goose/config.yaml (XDG path on macOS too) under an
+  // `extensions` map, with a per-entry shape that renames command→cmd and
+  // adds type/enabled/timeout. Handled by `yaml-merge` entryShape "goose".
+  const gooseConfig = join(home, ".config", "goose", "config.yaml")
+
   return [
     {
       id: "claude-desktop",
@@ -365,6 +379,34 @@ export function builtInAgents(): AgentDefinition[] {
       ],
       install: { type: "json-merge", path: witsyConfig },
       notes: "Witsy reads a Claude-compatible top-level `mcpServers` map in settings.json. Quit and relaunch Witsy to pick up the new server.",
+    },
+    {
+      id: "continue",
+      name: "Continue",
+      configPathHint: continueConfig,
+      detect: [
+        { type: "command", name: "cn" },
+        { type: "path-exists", path: join(home, ".continue") },
+      ],
+      install: { type: "yaml-merge", path: continueConfig, entryShape: "continue" },
+      notes: "Continue's global config is YAML (~/.continue/config.yaml); servers live in an `mcpServers` sequence keyed by `name`, merged in place so your models/rules stay put. Reload Continue to pick up the new server.",
+    },
+    {
+      id: "goose",
+      name: "Goose (Block)",
+      configPathHint: gooseConfig,
+      detect: [
+        { type: "command", name: "goose" },
+        { type: "app-bundle", mac: "Goose", linux: "goose" },
+        { type: "path-exists", path: join(home, ".config", "goose") },
+      ],
+      install: {
+        type: "yaml-merge",
+        path: gooseConfig,
+        keyPath: ["extensions"],
+        entryShape: "goose",
+      },
+      notes: "Goose stores MCP servers as `extensions` in ~/.config/goose/config.yaml (YAML); the entry uses `cmd` (not `command`) plus type/enabled/timeout. Restart Goose to load the new extension.",
     },
   ]
 }
