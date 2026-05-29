@@ -150,6 +150,19 @@ export function builtInAgents(): AgentDefinition[] {
   // map. (Remote servers sync via BoltAI Cloud; we target the local file.)
   const boltaiConfig = join(home, ".boltai", "mcp.json")
 
+  // ----- Witsy -----
+  // Electron app; settings live at <userData>/settings.json. Witsy reads a
+  // Claude-compatible top-level `mcpServers` object map (canonical
+  // {command, args, env}) and unions it with its own native array store, so
+  // the object map is the clean merge surface.
+  const witsyDataDir =
+    os === "darwin"
+      ? join(home, "Library", "Application Support", "Witsy")
+      : os === "win32"
+        ? join(process.env.APPDATA ?? home, "Witsy")
+        : join(home, ".config", "Witsy")
+  const witsyConfig = join(witsyDataDir, "settings.json")
+
   return [
     {
       id: "claude-desktop",
@@ -341,6 +354,17 @@ export function builtInAgents(): AgentDefinition[] {
       ],
       install: { type: "json-merge", path: boltaiConfig },
       notes: "BoltAI's local MCP servers live in ~/.boltai/mcp.json (`mcpServers`). macOS-only native app; quit and relaunch to pick up the new server.",
+    },
+    {
+      id: "witsy",
+      name: "Witsy",
+      configPathHint: witsyConfig,
+      detect: [
+        { type: "app-bundle", mac: "Witsy", win: "Witsy/Witsy.exe", linux: "witsy" },
+        { type: "path-exists", path: witsyDataDir },
+      ],
+      install: { type: "json-merge", path: witsyConfig },
+      notes: "Witsy reads a Claude-compatible top-level `mcpServers` map in settings.json. Quit and relaunch Witsy to pick up the new server.",
     },
   ]
 }
