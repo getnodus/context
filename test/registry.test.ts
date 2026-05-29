@@ -260,6 +260,56 @@ test("Jan entryShape writes `active: true` and round-trips to canonical", async 
   })
 })
 
+test("Witsy is registered as a json-merge agent writing settings.json under mcpServers", async () => {
+  await withConfigDir(async () => {
+    const agents = await loadAgents()
+    const rec = agents.find((a) => a.definition.id === "witsy")
+    assert.ok(rec, "witsy should be a registered built-in")
+    const install = rec!.definition.install
+    assert.equal(install.type, "json-merge")
+    assert.ok(
+      (install as { path: string }).path.endsWith("settings.json"),
+      "witsy should install into settings.json",
+    )
+    assert.equal((install as { entryShape?: string }).entryShape, undefined, "Witsy uses the canonical entry shape")
+  })
+})
+
+test("Witsy install + read + uninstall round-trip (top-level mcpServers map)", async () => {
+  await withConfigDir(async (configDir) => {
+    const settingsFile = join(configDir, "witsy-settings.json")
+    // Seed a settings.json that already holds unrelated user keys, to prove
+    // the merge preserves them (Witsy stores models/rules/etc. in this file).
+    await writeFile(
+      settingsFile,
+      JSON.stringify({ general: { theme: "dark" }, mcpServers: {} }),
+      "utf8",
+    )
+    const def: AgentDefinition = {
+      id: "witsy-clone",
+      name: "Witsy-clone",
+      configPathHint: settingsFile,
+      detect: { type: "always" },
+      install: { type: "json-merge", path: settingsFile },
+    }
+    const resolved = mkResolved(def)
+    const cmd = mcpCommandNpx()
+    assert.equal((await installAgent(resolved, cmd)).status, "installed")
+
+    const raw = JSON.parse(await readFile(settingsFile, "utf8"))
+    assert.equal(raw.general?.theme, "dark", "unrelated settings should be preserved")
+    const entry = raw.mcpServers?.["nodus-context"]
+    assert.ok(entry, "entry should land under top-level mcpServers")
+    assert.equal(entry.command, cmd.command)
+    assert.deepEqual(entry.args, cmd.args)
+
+    const read = await readMcp(resolved)
+    assert.equal(read?.command, cmd.command)
+    assert.equal((await installAgent(resolved, cmd)).status, "already-installed")
+    assert.equal(await uninstallAgent(resolved), true)
+  })
+})
+
 test("LM Studio, Warp, and Jan are registered with the expected install targets", async () => {
   await withConfigDir(async () => {
     const agents = await loadAgents()
