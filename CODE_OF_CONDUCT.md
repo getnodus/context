@@ -26,7 +26,7 @@ This code of conduct applies in all project spaces — GitHub issues, pull reque
 
 ## Enforcement
 
-Report unacceptable behavior to `conduct@nodus.to`. Reports are handled confidentially. Maintainers may warn, temporarily ban, or permanently ban anyone whose behavior is incompatible with this code.
+Report unacceptable behavior to `hi@nodus.to`. Reports are handled confidentially. Maintainers may warn, temporarily ban, or permanently ban anyone whose behavior is incompatible with this code.
 
 ## Attribution
 
