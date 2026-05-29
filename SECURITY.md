@@ -4,7 +4,7 @@
 
 Please **do not** open a public GitHub issue for security problems.
 
-Report privately via GitHub's [private vulnerability reporting](https://github.com/getnodus/context/security/advisories/new), or email `security@nodus.to`.
+Report privately via GitHub's [private vulnerability reporting](https://github.com/getnodus/context/security/advisories/new), or email `support@nodus.to`.
 
 Include:
 
