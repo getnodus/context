@@ -20,6 +20,13 @@ updates:
       - dependencies
     commit-message:
       prefix: deps
+    ignore:
+      # TypeScript majors are breaking migrations (e.g. TS6 dropped implicit
+      # @types/node pickup — see #34), not safe auto-merges. Hold the major
+      # bump until the migration is done deliberately; minors/patches flow.
+      # Remove this entry once #34 lands.
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: github-actions
     directory: /
