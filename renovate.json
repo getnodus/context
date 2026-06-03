@@ -1,4 +1,4 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": ["github>getnodus/.github"]
+  "extends": ["github>getnodus/workflow"]
 }
