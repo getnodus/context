@@ -2,7 +2,7 @@ import { detectTargets, inspectMcpHealth, readMcp } from "../integrations.js"
 import { getBackend } from "../context.js"
 import { configPath, getActiveProfile, loadConfig } from "../../config/index.js"
 import { bold, cyan, dim, green, info, yellow, red } from "../output.js"
-import { getDefaultLocalDir, makeEmbedderFromEnv } from "../../backends/index.js"
+import { getDefaultLocalDir, makeEmbedderFromEnv, type Profile } from "../../backends/index.js"
 import { computeMemoryHealth, renderHealthHeadline, type MemoryHealth } from "../../backends/health.js"
 import { packageVersion } from "../version.js"
 import { refreshUpdateInfo, upgradeCommand } from "../update-check.js"
@@ -41,6 +41,10 @@ export async function cmdDoctor(args: DoctorArgs = {}): Promise<void> {
     return
   }
   info(`${dim("profile:")} ${cyan(config.activeProfile)}  ${dim(`(${Object.keys(config.profiles).length} defined)`)}`)
+  const activeProfile = config.profiles[config.activeProfile]
+  if (activeProfile) {
+    info(`${dim("sharing:")} ${sharingLabel(activeProfile)}`)
+  }
 
   let backendType: string | undefined
   try {
@@ -196,6 +200,8 @@ async function cmdDoctorJson(): Promise<void> {
       active: config.activeProfile,
       defined: Object.keys(config.profiles),
     }
+    const active = config.profiles[config.activeProfile]
+    result.sharing = active ? sharingJson(active) : undefined
   } catch (e) {
     ;(result.issues as string[]).push(`config: ${(e as Error).message}`)
   }
@@ -287,6 +293,48 @@ async function cmdDoctorJson(): Promise<void> {
   }
   result.agents = agentsOut
   process.stdout.write(JSON.stringify(result, null, 2) + "\n")
+}
+
+function sharingLabel(profile: Profile): string {
+  switch (profile.type) {
+    case "local":
+      return `${green("local")}  ${dim("this device only")}`
+    case "http":
+      return `${yellow("server")}  ${dim(`${profile.url} · network required`)}`
+    case "mirror":
+      return `${green("mirror")}  ${dim(`local-first + ${remoteLabel(profile.secondary)}`)}`
+    case "module":
+      return `${yellow("custom")}  ${dim(profile.path)}`
+    default:
+      return dim((profile as { type: string }).type)
+  }
+}
+
+function sharingJson(profile: Profile): Record<string, unknown> {
+  switch (profile.type) {
+    case "local":
+      return { mode: "local", shared: false }
+    case "http":
+      return { mode: "server", shared: true, url: profile.url }
+    case "mirror":
+      return { mode: "mirror", shared: true, remote: remoteJson(profile.secondary) }
+    case "module":
+      return { mode: "custom", shared: undefined, path: profile.path }
+    default:
+      return { mode: (profile as { type: string }).type }
+  }
+}
+
+function remoteLabel(profile: Profile): string {
+  if (profile.type === "http") return profile.url
+  if (profile.type === "mirror") return remoteLabel(profile.secondary)
+  return profile.type
+}
+
+function remoteJson(profile: Profile): Record<string, unknown> {
+  if (profile.type === "http") return { type: "http", url: profile.url, authed: !!profile.token }
+  if (profile.type === "mirror") return remoteJson(profile.secondary)
+  return { type: profile.type }
 }
 
 /**

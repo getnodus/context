@@ -4,7 +4,7 @@ You are an AI assistant. A human has asked you to set up or interact with `@getn
 
 ## What the tool is
 
-A personal-context layer for MCP-speaking AI agents. It exposes `read_context` / `write_context` / `search_context` (and friends) so every agent the user runs — Claude Desktop, Claude Code, Codex CLI, Cursor, Cline, Windsurf, Zed — reads and writes through one shared store.
+A personal-context layer for MCP-speaking AI agents. It exposes simple shared-memory tools (`recall_context` / `remember_context`) plus advanced entry-management tools (`read_context` / `write_context` / `search_context`, and friends) so every agent the user runs — Claude Desktop, Claude Code, Codex CLI, Cursor, Cline, Windsurf, Zed — reads and writes through one shared store.
 
 The CLI is **`context`** (e.g. `context doctor`). The legacy name `nodus-context` is kept as an alias for existing installs and shell history; new scripts and your instructions to users should always use `context`.
 
@@ -26,7 +26,7 @@ The store is one of:
 
    ```sh
    context capabilities --json
-   context doctor --json
+   context status --json
    ```
 
    Parse the JSON. `capabilities.version` tells you what features exist — if it's less than `0.1.0`, tell the user to upgrade (you'll be missing the verify/confirm/accept/merge surface). `doctor.profile`, `doctor.backend`, `doctor.agents`, `doctor.memory`, `doctor.issues` give you a full picture: what's configured, what's broken, what's in the store, and what (if anything) needs cleanup.
@@ -45,9 +45,10 @@ The store is one of:
 
    **Don't suggest "pure server" (`--backend=server`).** Mirror is strictly better for almost everyone: same persistence, plus offline reads and faster startup. Only steer them to `server` if they explicitly insist on it.
 
-4. **Run setup non-interactively** with the right flags. Always pass `--json`.
+4. **Run setup non-interactively** with the right flags. Prefer the simple command when local memory is enough; use explicit `setup` flags when choosing a backend. Always pass `--json`.
 
    ```sh
+   context install --json
    context setup --backend=local --agents=detected --json
    # or
    context setup --backend=mirror --url=nodus://TOKEN@HOST:PORT --agents=detected --json
@@ -94,11 +95,13 @@ The setup is one-time. The bulk of your interaction is reading and writing entri
 
 | Tool | Use when |
 | --- | --- |
-| `read_context(id)` | Fetch one entry by id. |
-| `list_context({prefix, tag, type, limit})` | Survey what's known; filter to narrow. |
-| `search_context(query)` | Find entries by content; every hit carries a `confidence` field. |
-| `list_tags()` | Before inventing a new tag — reuse existing tags so the store stays coherent. |
-| `write_context({id, body, type, tags, supersedes, expires, verify})` | Save or update a durable fact. Returns `relatedExisting[]` and `verifyWarning` you must act on. |
+| `recall_context({query, scope, limit})` | Default read path: search shared memory, or list recent memories when `query` is omitted. |
+| `remember_context({text, scope})` | Default write path: save a natural-language durable memory while Context infers id/type/tags and likely updates. |
+| `read_context(id)` | Advanced: fetch one exact entry by id. |
+| `list_context({prefix, tag, type, limit})` | Advanced: survey known entries with exact filters. |
+| `search_context(query)` | Advanced: find entries by content; every hit carries a `confidence` field. |
+| `list_tags()` | Advanced: before inventing tags for `write_context`, reuse existing tags so the store stays coherent. |
+| `write_context({id, body, type, tags, supersedes, expires, verify})` | Advanced: save/update an exact durable fact. Returns `relatedExisting[]` and `verifyWarning` you must act on. |
 | `confirm_context([ids])` | Call near end-of-turn on entries you actually cited; runs verify + stamps a confirmation. |
 | `accept_context(id, reason)` | Only after the user explicitly confirms a failing verify is intentional. |
 | `merge_context(from, into, body?)` | Only after the user agrees two entries are duplicates. |
@@ -111,7 +114,7 @@ Resources (read directly, no tool call needed): `nodus-context://brief` (auto-lo
 Read the `nodus-context://brief` resource. It gives you rules (always-on directives), preferences (soft preferences), identity, and a `## Memory health` section listing problems the user should be aware of. The brief is loaded automatically by most clients; if yours doesn't, read it explicitly.
 
 ### Deciding what to save — the embarrassment test
-Before calling `write_context`, ask: *"Would I be embarrassed to make this same mistake — or ask this same question — again next session?"* If yes, save. If no, skip.
+Before calling `remember_context` or `write_context`, ask: *"Would I be embarrassed to make this same mistake — or ask this same question — again next session?"* If yes, save. If no, skip.
 
 This replaces type-category matching with a felt-shame check you can run mid-conversation. Things that pass: capability false-negatives the user corrected, preference reveals, "we tried that and it broke", non-obvious constraints. Things that fail: code structure, file paths, recent commits — re-derivable from the repo or `git log`.
 
@@ -132,7 +135,7 @@ When you create a *new* entry, tell the user in one short line: *"I added that t
 When you *edit* an existing entry, or refresh a verify/confirmation, stay silent. Narrating every touch becomes chatter and the user stops reading the line. The split — loud on novel, quiet on maintenance — keeps the signal high.
 
 ### When you learn something durable about the user
-Once the embarrassment test passes, call `write_context`. Pick a sensible id (path-style: `user/identity`, `preferences/communication`, `projects/<name>`). Set the `type` field correctly — it's how future agents know how to treat the entry:
+Once the embarrassment test passes, prefer `remember_context` with a concise natural-language `text`. Use `write_context` only when you need an exact id, explicit tags, verify metadata, or a hand-authored replacement. If using `write_context`, pick a sensible id (path-style: `user/identity`, `preferences/communication`, `projects/<name>`). Set the `type` field correctly — it's how future agents know how to treat the entry:
 
 - `rule` — always-on directive ("never use --no-verify")
 - `preference` — soft preference ("prefers terse responses")
@@ -183,6 +186,31 @@ context setup
                                   local→"default", server→"server", mirror→"cloud")
   --json                          machine-readable output (always pass this)
 
+context install
+  --agents=detected|all|none|<a,b,…>
+                                  simple default setup: local profile + agent install
+  --json                          machine-readable output
+
+context connect <pairing-string>
+                                  configure a mirror profile from a server pairing string, reconcile existing memories, and install agents
+
+context status
+  --json --memory                 alias for doctor, friendlier for humans
+
+context repair
+  --only=<id> --yes --dry-run      repair broken agent registrations
+
+context remember <text>
+  --scope=global|project|workspace --type=<type> --tag=<tag> --json
+                                  save a memory without choosing ids/frontmatter
+
+context recall [query]
+  --scope=global|project|workspace --limit=<n> --json
+                                  search memory, or list recent memories when query is omitted
+
+context sync reconcile <profile>
+                                  copy newer entries both ways between active and the named profile
+
 context add <id>
   --type=<rule|preference|fact|decision|gotcha|project-state|reference>
   --title=<t> --tag=<t> (repeatable) --supersedes=<id> (repeatable) --expires=<iso>
@@ -215,7 +243,7 @@ When `doctor --json` returns `issues[]`, map each issue to a fix:
 
 | issue contains… | action |
 | --- | --- |
-| `broken install (missing file …)` | `context init --repair --yes` |
+| `broken install (missing file …)` | `context repair --yes` |
 | `stale registration (app not installed)` | `context uninstall --only=<id> --yes` |
 | `backend unreachable: …` (when backend is http or mirror) | check the user's network / Tailscale / token; offer to switch back to local with `context use default` |
 
@@ -250,7 +278,7 @@ When `doctor --json` returns `memory.duplicateClusters[]` non-empty, offer `cont
 ## Things you can offer that humans often don't know about
 
 - **`context-server install`** — interactive one-shot that turns any box (Linux/macOS) into a Nodus Context server with systemd or launchd persistence. Outputs a pairing string the user can paste into other devices.
-- **`context join <pairing-string>`** — single command on a client device that takes the pairing string from the server and configures everything (profile, active switch, MCP install). Equivalent to `setup --backend=server --url=<pairing>`.
+- **`context connect <pairing-string>`** — single command on a client device that takes the pairing string from the server and configures everything (mirror profile, active switch, MCP install). `context join` remains as a backwards-compatible alias.
 - **mDNS auto-discovery** — when the wizard or `setup` is on the same LAN as a `context-server`, the server is found automatically; the user doesn't have to type the URL.
 - **Verify blocks on memories with references** — attach `--verify=repo:owner/name` (or `url:…`, `path:…`) when adding an entry that points at something which can rot. The system will keep itself honest.
 

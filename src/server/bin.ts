@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { readFile } from "node:fs/promises"
 import { parseArgs } from "node:util"
 import { LocalBackend } from "../backends/index.js"
 import { startServer } from "./index.js"
@@ -19,6 +20,8 @@ Options:
   --root <dir>    Storage directory (default ~/.nodus/context, or $NODUS_CONTEXT_DIR)
   --token <t>     Require Authorization: Bearer <t> on every request
                   (or $NODUS_CONTEXT_TOKEN)
+  --token-file <f>
+                  Read bearer token from a file
   --quiet         Suppress per-request access log
   --no-advertise  Don't broadcast over mDNS (LAN discovery off)
   -h, --help      Show this help
@@ -46,6 +49,7 @@ async function main(): Promise<void> {
       host: { type: "string" },
       root: { type: "string" },
       token: { type: "string" },
+      "token-file": { type: "string" },
       quiet: { type: "boolean" },
       "no-advertise": { type: "boolean" },
       help: { type: "boolean", short: "h" },
@@ -69,8 +73,11 @@ async function main(): Promise<void> {
       ? parseInt(process.env.PORT, 10)
       : 7475
   const host = parsed.values.host ?? "127.0.0.1"
-  const token = parsed.values.token ?? process.env.NODUS_CONTEXT_TOKEN
   const root = parsed.values.root ?? process.env.NODUS_CONTEXT_DIR
+  const token =
+    parsed.values.token ??
+    process.env.NODUS_CONTEXT_TOKEN ??
+    (parsed.values["token-file"] ? await readTokenFile(parsed.values["token-file"]) : undefined)
 
   if (host !== "127.0.0.1" && host !== "localhost" && !token) {
     process.stderr.write(
@@ -88,6 +95,7 @@ async function main(): Promise<void> {
     port,
     host,
     ...(token ? { token } : {}),
+    acksRootDir: backend.rootDir,
     onRequest: quiet
       ? undefined
       : ({ method, path, status, durationMs }) => {
@@ -131,6 +139,12 @@ async function main(): Promise<void> {
   }
   process.on("SIGINT", shutdown)
   process.on("SIGTERM", shutdown)
+}
+
+async function readTokenFile(path: string): Promise<string> {
+  const token = (await readFile(path, "utf8")).trim()
+  if (!token) throw new Error(`token file is empty: ${path}`)
+  return token
 }
 
 async function runInstallSubcommand(args: string[]): Promise<void> {

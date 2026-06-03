@@ -12,12 +12,14 @@ import { startServer } from "../src/server/index.js"
  */
 export async function startStubServer(
   backend: ContextBackend,
-  options: { token?: string } = {},
+  options: { token?: string; acksRootDir?: string; acksFile?: string } = {},
 ): Promise<{ url: string; close: () => Promise<void> }> {
   const running = await startServer(backend, {
     port: 0,
     host: "127.0.0.1",
     ...(options.token ? { token: options.token } : {}),
+    ...(options.acksRootDir ? { acksRootDir: options.acksRootDir } : {}),
+    ...(options.acksFile ? { acksFile: options.acksFile } : {}),
   })
   return { url: running.url, close: running.close }
 }

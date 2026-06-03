@@ -8,6 +8,11 @@ import {
 import { type Profile } from "../../backends/index.js"
 import { bold, cyan, dim, fail, green, info, printRestartHint, red, yellow } from "../output.js"
 import { decodePairing, isPairingString } from "../../server/pairing.js"
+import {
+  probeRemote,
+  reconcileProfileWithRemote,
+  type InitialSyncSummary,
+} from "../shared-memory.js"
 
 export interface SetupArgs {
   backend?: "local" | "server" | "mirror"
@@ -30,6 +35,10 @@ export interface SetupArgs {
 interface SetupResult {
   ok: boolean
   profile: { name: string; type: string; url?: string; authed?: boolean }
+  configured: boolean
+  reachable?: boolean
+  initialSync?: InitialSyncSummary
+  error?: string
   agents: {
     installed: { id: string; status: "installed" | "updated" | "already-installed" }[]
     failed: { id: string; error: string }[]
@@ -54,6 +63,7 @@ export async function cmdSetup(args: SetupArgs): Promise<void> {
 
   // ----- profile -----
   let profile: Profile
+  let remoteProfile: Extract<Profile, { type: "http" }> | undefined
   let profileName = args.profile ?? defaultProfileName(backend)
   const notes: string[] = []
   let serverUrl: string | undefined
@@ -82,28 +92,94 @@ export async function cmdSetup(args: SetupArgs): Promise<void> {
       profile = { type: "local" }
       break
     case "server":
-      profile = {
+      remoteProfile = {
         type: "http",
         url: serverUrl!,
         ...(serverToken ? { token: serverToken } : {}),
       }
+      profile = remoteProfile
       break
     case "mirror":
+      remoteProfile = {
+        type: "http",
+        url: serverUrl!,
+        ...(serverToken ? { token: serverToken } : {}),
+      }
       profile = {
         type: "mirror",
         primary: { type: "local" },
-        secondary: {
-          type: "http",
-          url: serverUrl!,
-          ...(serverToken ? { token: serverToken } : {}),
-        },
+        secondary: remoteProfile,
       }
       break
     default:
       fail(`setup: unknown backend "${backend}" (expected local | server | mirror)`)
   }
 
+  if (remoteProfile) {
+    const probe = await probeRemote(remoteProfile.url, remoteProfile.token)
+    if (!probe.ok) {
+      const result: SetupResult = {
+        ok: false,
+        profile: {
+          name: profileName,
+          type: profile!.type,
+          ...(serverUrl ? { url: serverUrl } : {}),
+          ...(serverUrl ? { authed: !!serverToken } : {}),
+        },
+        configured: false,
+        reachable: probe.reachable,
+        ...(probe.error ? { error: probe.error } : {}),
+        agents: { installed: [], failed: [], skipped: [] },
+        notes: ["profile was not changed because the remote backend could not be verified"],
+      }
+      if (args.json) {
+        process.stdout.write(JSON.stringify(result, null, 2) + "\n")
+        process.exit(1)
+      }
+      info(bold("\nnodus-context setup"))
+      info(`  ${dim("profile  →")} ${cyan(profileName)} ${dim(`(${profile!.type})`)}`)
+      info(`  ${dim("url      →")} ${cyan(serverUrl!)}${serverToken ? dim(" (auth)") : ""}`)
+      info(`  ${dim("reachable→")} ${probe.reachable ? green("yes") : red("no")}`)
+      info(red(`  not configured: ${probe.error ?? "remote backend probe failed"}`))
+      process.exit(1)
+    }
+  }
+
   const config = await loadConfig()
+  const previousProfile = config.profiles[config.activeProfile]
+
+  let initialSync: InitialSyncSummary | undefined
+  if (remoteProfile && previousProfile) {
+    try {
+      initialSync = await reconcileProfileWithRemote(previousProfile, remoteProfile)
+    } catch (e) {
+      const result: SetupResult = {
+        ok: false,
+        profile: {
+          name: profileName,
+          type: profile!.type,
+          ...(serverUrl ? { url: serverUrl } : {}),
+          ...(serverUrl ? { authed: !!serverToken } : {}),
+        },
+        configured: false,
+        reachable: true,
+        initialSync: { copied: 0, failed: 1, skipped: 0 },
+        error: `initial sync failed: ${(e as Error).message}`,
+        agents: { installed: [], failed: [], skipped: [] },
+        notes: ["profile was not changed because existing memory could not be reconciled"],
+      }
+      if (args.json) {
+        process.stdout.write(JSON.stringify(result, null, 2) + "\n")
+        process.exit(1)
+      }
+      info(bold("\nnodus-context setup"))
+      info(`  ${dim("profile  →")} ${cyan(profileName)} ${dim(`(${profile!.type})`)}`)
+      info(`  ${dim("url      →")} ${cyan(serverUrl!)}${serverToken ? dim(" (auth)") : ""}`)
+      info(red(`  not configured: ${result.error}`))
+      process.exit(1)
+    }
+  }
+
   config.profiles[profileName] = profile!
   config.activeProfile = profileName
   await saveConfig(config)
@@ -156,6 +232,9 @@ export async function cmdSetup(args: SetupArgs): Promise<void> {
       ...(serverUrl ? { url: serverUrl } : {}),
       ...(serverUrl ? { authed: !!serverToken } : {}),
     },
+    configured: true,
+    ...(remoteProfile ? { reachable: true } : {}),
+    ...(initialSync ? { initialSync } : {}),
     agents: { installed, failed, skipped },
     notes: [
       ...notes,
@@ -176,6 +255,11 @@ export async function cmdSetup(args: SetupArgs): Promise<void> {
   info(bold("\nnodus-context setup"))
   info(`  ${dim("profile  →")} ${cyan(profileName)} ${dim(`(${profile!.type})`)}`)
   if (serverUrl) info(`  ${dim("url      →")} ${cyan(serverUrl)}${serverToken ? dim(" (auth)") : ""}`)
+  if (remoteProfile) info(`  ${dim("reachable→")} ${green("yes")}`)
+  if (initialSync) {
+    const syncText = `${initialSync.copied} copied, ${initialSync.skipped} already in sync`
+    info(`  ${dim("sync     →")} ${initialSync.failed > 0 ? red(syncText + `, ${initialSync.failed} failed`) : green(syncText)}`)
+  }
   for (const a of installed) {
     info(`  ${green(a.status.padEnd(18))} ${a.id}`)
   }

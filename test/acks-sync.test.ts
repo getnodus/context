@@ -1,6 +1,6 @@
 import test from "node:test"
 import assert from "node:assert/strict"
-import { mkdtemp, rm } from "node:fs/promises"
+import { mkdtemp, readFile, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { HttpBackend, LocalBackend, MirrorBackend } from "../src/backends/index.js"
@@ -57,6 +57,23 @@ test("http /acks: empty key list is a noop, never throws", async () => {
     assert.equal(result.added, 0)
   } finally {
     await close()
+  }
+})
+
+test("http /acks stores under the server context root when provided", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "ctx-acks-root-"))
+  const backend = new LocalBackend({ rootDir: join(dir, "store") })
+  await backend.init()
+  const server = await startStubServer(backend, { acksRootDir: backend.rootDir })
+  try {
+    const client = new HttpBackend({ url: server.url })
+    await client.recordAcks(["rooted"])
+    const raw = await readFile(join(backend.rootDir, ".cache", "server-acks.json"), "utf8")
+    const parsed = JSON.parse(raw)
+    assert.ok(parsed.rooted, "ack file should live under the backend root")
+  } finally {
+    await server.close()
+    await rm(dir, { recursive: true, force: true })
   }
 })
 

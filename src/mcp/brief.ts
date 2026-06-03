@@ -158,12 +158,12 @@ export async function renderBrief(
   if (!any && healthBullets.length === 0) {
     lines.push(
       "_No durable user context recorded yet. As you learn things about the user that should " +
-        "persist across sessions, call `write_context` with an appropriate `type`._",
+        "persist across sessions, call `remember_context`._",
     )
   } else {
     lines.push(
       "---",
-      "_Use `list_context`, `search_context`, or read the `nodus-context://entry/{id}` resources for full bodies._",
+      "_Use `recall_context` for the normal path; use `list_context`, `search_context`, or `nodus-context://entry/{id}` when you need exact entry details._",
     )
   }
 

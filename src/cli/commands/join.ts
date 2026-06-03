@@ -1,11 +1,13 @@
 import { decodePairing } from "../../server/pairing.js"
 import { loadConfig, saveConfig } from "../../config/index.js"
-import { bold, cyan, dim, fail, green, info, printRestartHint, red, yellow } from "../output.js"
+import { bold, cyan, dim, fail, green, info, printRestartHint, red } from "../output.js"
 import { detectTargets, installMcp, mcpCommand } from "../integrations.js"
+import { type Profile, type ProfileHttp } from "../../backends/index.js"
+import { probeRemote, reconcileProfileWithRemote } from "../shared-memory.js"
 
 export interface JoinArgs {
   pairingString: string
-  /** Profile name to write. Defaults to "server". */
+  /** Profile name to write. Defaults to "cloud". */
   name?: string
   /** Skip MCP install on detected agents (just write the profile). */
   noInstall?: boolean
@@ -14,19 +16,24 @@ export interface JoinArgs {
 }
 
 interface JoinResult {
+  ok: boolean
   profile: string
+  type: "mirror"
   url: string
   authed: boolean
+  configured: boolean
   installed: string[]
   failed: { id: string; error: string }[]
   reachable: boolean
+  initialSync?: { copied: number; failed: number; skipped: number }
+  error?: string
 }
 
 /**
  * One-shot client-side onboarding: paste a pairing string, get configured.
  *
- * Equivalent to: profile add --type=http --url=... --token=... --use,
- * then init --yes. Idempotent — re-running overwrites the same profile
+ * Equivalent to: profile add --type=mirror --url=... --token=... --use,
+ * then install for detected agents. Idempotent — re-running overwrites the same profile
  * name rather than accumulating.
  */
 export async function cmdJoin(args: JoinArgs): Promise<void> {
@@ -37,25 +44,71 @@ export async function cmdJoin(args: JoinArgs): Promise<void> {
     fail((e as Error).message)
   }
 
-  const profileName = args.name ?? "server"
+  const probeResult = await probeRemote(pairing!.url, pairing!.token)
+  const profileName = args.name ?? "cloud"
+  const result: JoinResult = {
+    ok: probeResult.ok,
+    profile: profileName,
+    type: "mirror",
+    url: pairing!.url,
+    authed: !!pairing!.token,
+    configured: false,
+    installed: [],
+    failed: [],
+    reachable: probeResult.reachable,
+    ...(probeResult.error ? { error: probeResult.error } : {}),
+  }
+
+  if (!probeResult.ok) {
+    if (args.json) {
+      process.stdout.write(JSON.stringify(result, null, 2) + "\n")
+      process.exit(1)
+    }
+    info(bold("nodus-context join"))
+    info(`  ${dim("url      →")} ${cyan(pairing!.url)}${pairing!.token ? dim(" (auth)") : ""}`)
+    info(`  ${dim("reachable→")} ${probeResult.reachable ? green("yes") : red("no")}`)
+    info(red(`  not configured: ${probeResult.error ?? "server probe failed"}`))
+    return
+  }
+
   const config = await loadConfig()
-  config.profiles[profileName] = {
+  const previousProfileName = config.activeProfile
+  const previousProfile = config.profiles[previousProfileName]
+  const secondaryProfile: ProfileHttp = {
     type: "http",
     url: pairing!.url,
     ...(pairing!.token ? { token: pairing!.token } : {}),
   }
+  const mirrorProfile: Profile = {
+    type: "mirror",
+    primary: { type: "local" },
+    secondary: secondaryProfile,
+  }
+
+  if (previousProfile) {
+    try {
+      result.initialSync = await reconcileProfileWithRemote(previousProfile, secondaryProfile)
+    } catch (e) {
+      result.ok = false
+      result.initialSync = { copied: 0, failed: 1, skipped: 0 }
+      result.error = `initial sync failed: ${(e as Error).message}`
+      if (args.json) {
+        process.stdout.write(JSON.stringify(result, null, 2) + "\n")
+        process.exit(1)
+      }
+      info(bold("nodus-context join"))
+      info(`  ${dim("profile  →")} ${cyan(profileName)} ${dim("(mirror)")}`)
+      info(`  ${dim("url      →")} ${cyan(pairing!.url)}${pairing!.token ? dim(" (auth)") : ""}`)
+      info(`  ${dim("reachable→")} ${green("yes")}`)
+      info(red(`  not configured: ${result.error}`))
+      process.exit(1)
+    }
+  }
+
+  config.profiles[profileName] = mirrorProfile
   config.activeProfile = profileName
   await saveConfig(config)
-
-  const reachable = await probe(pairing!.url, pairing!.token)
-  const result: JoinResult = {
-    profile: profileName,
-    url: pairing!.url,
-    authed: !!pairing!.token,
-    installed: [],
-    failed: [],
-    reachable,
-  }
+  result.configured = true
 
   if (!args.noInstall) {
     const targets = (await detectTargets()).filter((t) => t.detected)
@@ -76,37 +129,20 @@ export async function cmdJoin(args: JoinArgs): Promise<void> {
   }
 
   info(bold("nodus-context join"))
-  info(`  ${dim("profile  →")} ${cyan(profileName)} ${dim("(active)")}`)
+  info(`  ${dim("profile  →")} ${cyan(profileName)} ${dim("(mirror, active)")}`)
   info(`  ${dim("url      →")} ${cyan(pairing!.url)}${pairing!.token ? dim(" (auth)") : ""}`)
-  info(`  ${dim("reachable→")} ${reachable ? green("yes") : red("no")}`)
+  info(`  ${dim("reachable→")} ${probeResult.reachable ? green("yes") : red("no")}`)
   if (result.installed.length > 0) {
     info(`  ${dim("installed→")} ${green(result.installed.join(", "))}`)
+  }
+  if (result.initialSync) {
+    const syncText = `${result.initialSync.copied} copied, ${result.initialSync.skipped} already in sync`
+    info(`  ${dim("sync     →")} ${result.initialSync.failed > 0 ? red(syncText + `, ${result.initialSync.failed} failed`) : green(syncText)}`)
   }
   for (const f of result.failed) {
     info(`  ${red("failed   ")} ${f.id}: ${f.error}`)
   }
-  if (!reachable) {
-    info(yellow("server didn't respond. profile saved; verify URL and try again."))
-  } else if (result.installed.length > 0) {
+  if (result.installed.length > 0) {
     printRestartHint()
-  }
-}
-
-async function probe(url: string, token?: string): Promise<boolean> {
-  const ctrl = new AbortController()
-  const t = setTimeout(() => ctrl.abort(), 5000)
-  try {
-    const res = await fetch(url.replace(/\/+$/, "") + "/", {
-      headers: token ? { authorization: `Bearer ${token}` } : {},
-      signal: ctrl.signal,
-    })
-    return res.ok || res.status === 401 || res.status === 403
-    // 401/403 still mean the server is reachable; the token may be wrong.
-    // We surface "reachable: true" so the user knows it's online; auth
-    // failure shows up at first real read/write.
-  } catch {
-    return false
-  } finally {
-    clearTimeout(t)
   }
 }

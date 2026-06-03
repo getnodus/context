@@ -86,7 +86,12 @@ export async function runServerInstall(opts: InstallOptions): Promise<InstallRes
 
   // ----- token -----
   const wantToken = host !== "127.0.0.1" && host !== "localhost"
+  const tokenFile = join(homedir(), ".nodus", "server-token.txt")
   let token = opts.token
+  if (wantToken && !token) {
+    token = await readSavedToken(tokenFile)
+    if (token) info(dim(`Reusing existing token at ${tokenFile}`))
+  }
   if (wantToken && !token) {
     if (opts.yes) {
       token = randomBytes(32).toString("hex")
@@ -107,6 +112,13 @@ export async function runServerInstall(opts: InstallOptions): Promise<InstallRes
   // ----- prepare data dir -----
   await ensureDir(rootDir)
 
+  // ----- save token locally for the operator and service wrappers -----
+  if (token) {
+    await ensureDir(dirname(tokenFile))
+    await writeFile(tokenFile, token + "\n", { encoding: "utf8", mode: 0o600 })
+    await chmod(tokenFile, 0o600)
+  }
+
   // ----- service install? -----
   const installService =
     opts.installService ??
@@ -120,6 +132,7 @@ export async function runServerInstall(opts: InstallOptions): Promise<InstallRes
         port,
         host,
         token,
+        tokenFile,
         unitDir: opts.unitDirOverride ?? "/etc/systemd/system",
       })
     } else if (platform() === "darwin") {
@@ -127,21 +140,13 @@ export async function runServerInstall(opts: InstallOptions): Promise<InstallRes
         rootDir,
         port,
         host,
-        token,
+        tokenFile: token ? tokenFile : undefined,
         plistDir:
           opts.unitDirOverride ?? join(homedir(), "Library", "LaunchAgents"),
       })
     } else {
       info(yellow(`service install not supported on ${platform()}; you'll need to run nodus-context-server manually`))
     }
-  }
-
-  // ----- save token locally for the operator -----
-  if (token) {
-    const tokenFile = join(homedir(), ".nodus", "server-token.txt")
-    await ensureDir(dirname(tokenFile))
-    await writeFile(tokenFile, token + "\n", { encoding: "utf8", mode: 0o600 })
-    await chmod(tokenFile, 0o600)
   }
 
   // ----- pairing string -----
@@ -169,7 +174,7 @@ export async function runServerInstall(opts: InstallOptions): Promise<InstallRes
   if (token) info(`  ${dim("token  →")} ${cyan(join(homedir(), ".nodus", "server-token.txt"))} ${dim("(chmod 600)")}`)
   info("")
   info(bold("Pair clients with one of:"))
-  info(`  ${green("$")} ${cyan(`nodus-context join ${pairing}`)}`)
+  info(`  ${green("$")} ${cyan(`context connect ${pairing}`)}`)
   info(`  …or paste ${cyan(pairing)} into any client's setup wizard.`)
   info("")
   return result
@@ -182,6 +187,7 @@ async function writeSystemdUnit(opts: {
   port: number
   host: string
   token?: string
+  tokenFile?: string
   unitDir: string
 }): Promise<string> {
   const user = process.env.USER ?? process.env.LOGNAME ?? "root"
@@ -237,7 +243,7 @@ async function writeLaunchdPlist(opts: {
   rootDir: string
   port: number
   host: string
-  token?: string
+  tokenFile?: string
   plistDir: string
 }): Promise<string> {
   const label = "co.nodus.context"
@@ -250,14 +256,8 @@ async function writeLaunchdPlist(opts: {
     String(opts.port),
     "--root",
     opts.rootDir,
+    ...(opts.tokenFile ? ["--token-file", opts.tokenFile] : []),
   ]
-  const envBlock = opts.token
-    ? `  <key>EnvironmentVariables</key>
-  <dict>
-    <key>NODUS_CONTEXT_TOKEN</key>
-    <string>${escapeXml(opts.token)}</string>
-  </dict>`
-    : ""
   const argsBlock = args.map((a) => `    <string>${escapeXml(a)}</string>`).join("\n")
   const plist = `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -273,7 +273,6 @@ ${argsBlock}
   <true/>
   <key>KeepAlive</key>
   <true/>
-${envBlock}
   <key>StandardOutPath</key>
   <string>${join(homedir(), "Library", "Logs", `${label}.log`)}</string>
   <key>StandardErrorPath</key>
@@ -297,6 +296,15 @@ async function ensureDir(p: string): Promise<void> {
     await mkdir(p, { recursive: true })
   } catch (e: any) {
     if (e?.code !== "EEXIST") throw e
+  }
+}
+
+async function readSavedToken(path: string): Promise<string | undefined> {
+  try {
+    const token = (await readFile(path, "utf8")).trim()
+    return token || undefined
+  } catch {
+    return undefined
   }
 }
 
