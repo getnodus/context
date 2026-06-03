@@ -1,6 +1,23 @@
+<div align="center">
+
+<img src="assets/nodus-mark.svg" alt="Nodus" width="100" height="100">
+
 # @getnodus/context
 
-**Personal context layer for AI agents. Your memory, portable across every agent you use.**
+**Personal context layer for AI agents.**
+<br>
+Your memory, portable across every agent you use.
+
+<br>
+
+[![npm](https://img.shields.io/npm/v/@getnodus/context?style=flat-square&labelColor=000000&color=DB2F61)](https://www.npmjs.com/package/@getnodus/context)
+[![MCP](https://img.shields.io/badge/protocol-MCP-000000?style=flat-square&labelColor=000000)](https://modelcontextprotocol.io)
+[![local-first](https://img.shields.io/badge/local--first-no_telemetry-000000?style=flat-square&labelColor=000000)](#network-use)
+[![license](https://img.shields.io/badge/license-MIT-000000?style=flat-square&labelColor=000000)](#license)
+
+</div>
+
+---
 
 Every agent you talk to starts from zero. Claude doesn't know what Cursor learned about you; Cursor doesn't know what ChatGPT learned. `@getnodus/context` is one place that stores facts about you — identity, preferences, projects, decisions — that any agent speaking [MCP](https://modelcontextprotocol.io) can read from and write to.
 
