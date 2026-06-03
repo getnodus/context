@@ -6,6 +6,10 @@ All notable changes to `@getnodus/context` are documented here. Format roughly f
 
 <!-- New entries land here. Group under topical subheadings (e.g. *Agent registry*, *Self-maintaining memory*) to match past releases. -->
 
+### Brief
+
+- **Workspace-aware brief.** The session-start brief now adds a **This workspace** section surfacing entries whose id segments or tags match the repo the agent is working in — so an agent starts already knowing about *this* project, not just always-on rules. The workspace is detected from the MCP client's [roots](https://modelcontextprotocol.io/specification/2025-06-18/client/roots) (leaf and parent directory names, so both a repo and a Conductor branch folder match), falling back to the server's working directory when the client exposes no roots. Matching is on whole id/tag segments (so `context` won't match `mycontextual`), entries already shown under Rules/Preferences/Identity aren't repeated, and the `listRoots` round-trip is bounded by a 1s timeout. Clients that expose no workspace see exactly the brief they saw before. The brief renderer moved to its own module (`src/mcp/brief.ts`) and is now unit-tested.
+
 ### Build
 
 - **Migrated to TypeScript 6.** TS 6 stopped picking up `@types/node` implicitly, so the build flooded with errors for `process`, `fetch`, `Buffer`, `node:*` imports and other Node globals. `tsconfig.json` now declares `"types": ["node"]` explicitly, restoring resolution. `pnpm typecheck && pnpm test` are green on TS 6.0.3 across the Node 20/22/24 matrix.

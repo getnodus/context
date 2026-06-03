@@ -49,7 +49,7 @@ Once installed, MCP clients see your context without any prompting from you:
 
 **Resources** (auto-loaded at session start by most clients):
 
-- `nodus-context://brief` — a digest of always-on context: rules, preferences, identity.
+- `nodus-context://brief` — a digest of always-on context: rules, preferences, identity, plus a **This workspace** section of entries relevant to the repo the agent is currently in (matched against the MCP client's workspace roots, falling back to its working directory).
 - `nodus-context://entry/{id}` — one resource per entry, browseable.
 
 **Tools** (called as needed):
