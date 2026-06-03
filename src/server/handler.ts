@@ -1,7 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http"
 import { timingSafeEqual } from "node:crypto"
 import type { ContextBackend, VerifySpec, VerifyStatus, Confirmation } from "../backends/index.js"
-import { MAX_BODY_BYTES } from "../backends/index.js"
+import { BackendError, ContextNotFoundError, InvalidIdError, MAX_BODY_BYTES } from "../backends/index.js"
 import { runVerify } from "../backends/verify.js"
 import { computeMemoryHealth } from "../backends/health.js"
 import { packageVersion } from "../cli/version.js"
@@ -19,6 +19,10 @@ const MAX_LIMIT = 1000
 export interface HandlerOptions {
   /** If set, requests must include `Authorization: Bearer <token>`. */
   token?: string
+  /** Store /acks under this context root. Defaults to NODUS_CONTEXT_DIR or ~/.nodus/context. */
+  acksRootDir?: string
+  /** Explicit /acks storage file override. */
+  acksFile?: string
   /** Called once per completed request for access logging. */
   onRequest?: (info: {
     method: string
@@ -118,9 +122,13 @@ export function createHandler(
           try {
             const snap = await backend.readSnapshot(id, snapshotName)
             sendJson(res, 200, snap)
-          } catch {
-            status = 404
-            sendJson(res, 404, { error: "snapshot not found" })
+          } catch (e) {
+            if (isMissing(e)) {
+              status = 404
+              sendJson(res, 404, { error: "snapshot not found" })
+            } else {
+              throw e
+            }
           }
           return
         }
@@ -128,9 +136,13 @@ export function createHandler(
         try {
           const entry = await backend.read(id)
           sendJson(res, 200, entry)
-        } catch {
-          status = 404
-          sendJson(res, 404, { error: "not found" })
+        } catch (e) {
+          if (isMissing(e)) {
+            status = 404
+            sendJson(res, 404, { error: "not found" })
+          } else {
+            throw e
+          }
         }
         return
       }
@@ -161,7 +173,7 @@ export function createHandler(
           sendJson(res, 413, { error: `request body exceeds ${MAX_REQUEST_BYTES} bytes` })
           return
         }
-        const parsed = body ? JSON.parse(body) : {}
+        const parsed = parseJsonBody(body)
 
         // Server-side verify-on-write. If the request carries a verify spec
         // but no pre-computed verifyStatus, run the check here so clients
@@ -198,6 +210,12 @@ export function createHandler(
           }
         }
 
+        if (typeof parsed.body !== "string") {
+          status = 400
+          sendJson(res, 400, { error: "body must be a string" })
+          return
+        }
+
         const entry = await backend.write({
           id,
           body: parsed.body,
@@ -226,9 +244,13 @@ export function createHandler(
         try {
           await backend.delete(id)
           sendJson(res, 200, { deleted: true })
-        } catch {
-          status = 404
-          sendJson(res, 404, { error: "not found" })
+        } catch (e) {
+          if (isMissing(e)) {
+            status = 404
+            sendJson(res, 404, { error: "not found" })
+          } else {
+            throw e
+          }
         }
         return
       }
@@ -251,7 +273,7 @@ export function createHandler(
           sendJson(res, 413, { error: `request body exceeds ${MAX_REQUEST_BYTES} bytes` })
           return
         }
-        const parsed = body ? JSON.parse(body) : {}
+        const parsed = parseJsonBody(body)
         const entry = await backend.revert(id, parsed.snapshot, parsed.author)
         sendJson(res, 200, entry)
         return
@@ -283,7 +305,7 @@ export function createHandler(
 
       // GET /acks — cross-device acknowledgment map (see PROTOCOL.md)
       if (method === "GET" && segments[0] === "acks" && segments.length === 1) {
-        const acks = await loadServerAcks()
+        const acks = await loadServerAcks({ rootDir: options.acksRootDir, file: options.acksFile })
         sendJson(res, 200, { acks })
         return
       }
@@ -296,9 +318,9 @@ export function createHandler(
           sendJson(res, 413, { error: `request body exceeds ${MAX_REQUEST_BYTES} bytes` })
           return
         }
-        const parsed = body ? JSON.parse(body) : {}
+        const parsed = parseJsonBody(body)
         const keys = Array.isArray(parsed?.keys) ? parsed.keys.filter((k: unknown): k is string => typeof k === "string") : []
-        const result = await recordServerAcks(keys)
+        const result = await recordServerAcks(keys, { rootDir: options.acksRootDir, file: options.acksFile })
         sendJson(res, 200, result)
         return
       }
@@ -307,8 +329,8 @@ export function createHandler(
       res.statusCode = 404
       res.end()
     } catch (e: any) {
-      status = 500
-      res.statusCode = 500
+      status = statusForError(e)
+      res.statusCode = status
       res.setHeader("content-type", "application/json")
       res.end(JSON.stringify({ error: e?.message ?? String(e) }))
     } finally {
@@ -326,6 +348,21 @@ function sendJson(res: ServerResponse, status: number, body: unknown) {
   res.statusCode = status
   res.setHeader("content-type", "application/json")
   res.end(JSON.stringify(body))
+}
+
+function parseJsonBody(body: string | typeof TOO_LARGE): Record<string, any> {
+  if (body === TOO_LARGE) throw new Error("internal error: oversized body parsed")
+  if (!body) return {}
+  try {
+    const parsed = JSON.parse(body)
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      throw new ClientInputError("request body must be a JSON object")
+    }
+    return parsed
+  } catch (e) {
+    if (e instanceof ClientInputError) throw e
+    throw new ClientInputError("malformed JSON request body")
+  }
 }
 
 /**
@@ -373,4 +410,22 @@ function tokenMatches(headerValue: string | string[] | undefined, expected: stri
   const target = Buffer.from(expected)
   if (provided.length !== target.length) return false
   return timingSafeEqual(provided, target)
+}
+
+class ClientInputError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = "ClientInputError"
+  }
+}
+
+function isMissing(e: unknown): boolean {
+  return e instanceof ContextNotFoundError || (e instanceof Error && /not found|no snapshot|no history/i.test(e.message))
+}
+
+function statusForError(e: unknown): number {
+  if (e instanceof ClientInputError || e instanceof InvalidIdError) return 400
+  if (e instanceof ContextNotFoundError) return 404
+  if (e instanceof BackendError) return 502
+  return 500
 }

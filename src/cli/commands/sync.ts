@@ -1,10 +1,11 @@
-import { createBackend, ContextBackend, ContextEntry } from "../../backends/index.js"
+import { createBackend, ContextBackend } from "../../backends/index.js"
 import { loadConfig } from "../../config/index.js"
 import { bold, cyan, dim, fail, green, info, red, yellow } from "../output.js"
 import { confirm } from "../prompt.js"
+import { reconcileBackends, syncBackends } from "../../sync.js"
 
 export interface SyncArgs {
-  direction: "push" | "pull"
+  direction: "push" | "pull" | "reconcile"
   /** Profile to read from (push: source; pull: source). */
   from: string
   /** Profile to write to (push: target; pull: target). */
@@ -32,32 +33,9 @@ export async function cmdSync(args: SyncArgs): Promise<void> {
   if (args.dryRun) info(yellow("dry-run: no changes will be written"))
   info("")
 
-  // Decide what to copy. For an idempotent reconcile, walk the source and
-  // skip entries whose target version has an equal-or-newer `updated`
-  // timestamp (unless --overwrite). New ids are copied; existing ones
-  // are updated only when the source is strictly newer.
-  const sourceSummaries = await source.list({ sort: "id-asc", includeExpired: true })
-  const targetSummaries = await target.list({ sort: "id-asc", includeExpired: true })
-  const targetByMap = new Map<string, { updated: string }>()
-  for (const t of targetSummaries) targetByMap.set(t.id, { updated: t.updated })
-
-  let toCopy: ContextEntry[] = []
-  let skippedSameOrNewer = 0
-  for (const s of sourceSummaries) {
-    const tgt = targetByMap.get(s.id)
-    if (!args.overwrite && tgt && tgt.updated >= s.updated) {
-      skippedSameOrNewer++
-      continue
-    }
-    toCopy.push(await source.read(s.id))
-  }
-
-  if (toCopy.length === 0) {
-    info(green("up to date.") + dim(` (${skippedSameOrNewer} entries already in sync)`))
-    return
-  }
-
-  info(`${toCopy.length} entries to copy${skippedSameOrNewer > 0 ? dim(`, ${skippedSameOrNewer} in sync`) : ""}`)
+  const sourceCount = (await source.list({ includeExpired: true })).length
+  const targetCount = (await target.list({ includeExpired: true })).length
+  info(`${sourceCount} source entries, ${targetCount} target entries`)
   if (!args.yes && !args.dryRun) {
     const ok = await confirm("proceed?", true)
     if (!ok) {
@@ -66,34 +44,28 @@ export async function cmdSync(args: SyncArgs): Promise<void> {
     }
   }
 
-  let ok = 0
-  let failed = 0
-  for (const entry of toCopy) {
-    if (args.dryRun) {
-      info(`  ${yellow("would copy")} ${entry.id}`)
-      continue
-    }
-    try {
-      await target.write({
-        id: entry.id,
-        body: entry.body,
-        title: entry.title,
-        type: entry.type,
-        tags: entry.tags,
-        supersedes: entry.supersedes,
-        expires: entry.expires,
-        author: entry.author,
-      })
-      ok++
-      info(`  ${green("ok")}   ${entry.id}`)
-    } catch (e) {
-      failed++
-      info(`  ${red("fail")} ${entry.id}: ${(e as Error).message}`)
-    }
+  const callbacks = {
+    onCopy: (entry: { id: string }, direction: "forward" | "backward") => {
+      const label = args.dryRun ? yellow("would copy") : green("ok")
+      const arrow = direction === "forward" ? `${from}→${to}` : `${to}→${from}`
+      info(`  ${label} ${dim(arrow)} ${entry.id}`)
+    },
+    onError: (entry: { id: string }, e: Error, direction: "forward" | "backward") => {
+      const arrow = direction === "forward" ? `${from}→${to}` : `${to}→${from}`
+      info(`  ${red("fail")} ${dim(arrow)} ${entry.id}: ${e.message}`)
+    },
   }
 
+  const result =
+    args.direction === "reconcile"
+      ? await reconcileBackends(source, target, { overwrite: args.overwrite, dryRun: args.dryRun, ...callbacks })
+      : { forward: await syncBackends(source, target, { overwrite: args.overwrite, dryRun: args.dryRun, ...callbacks }), backward: { copied: 0, failed: 0, skipped: 0 } }
+
+  const copied = result.forward.copied + result.backward.copied
+  const failed = result.forward.failed + result.backward.failed
+  const skipped = result.forward.skipped + result.backward.skipped
   info("")
-  info(`${green(`copied ${ok}`)}${failed > 0 ? red(`, ${failed} failed`) : ""}${skippedSameOrNewer > 0 ? dim(`, ${skippedSameOrNewer} in sync`) : ""}`)
+  info(`${green(`copied ${copied}`)}${failed > 0 ? red(`, ${failed} failed`) : ""}${skipped > 0 ? dim(`, ${skipped} in sync`) : ""}`)
 }
 
 async function openBackend(

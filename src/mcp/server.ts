@@ -26,6 +26,7 @@ import { packageVersion } from "../cli/version.js"
 import { refreshUpdateInfo } from "../cli/update-check.js"
 import { renderBrief } from "./brief.js"
 import { deriveWorkspaceHints, rootUriToPath } from "./workspace.js"
+import { recallContext, rememberContext } from "../memory.js"
 
 const ID_FIELD = z
   .string()
@@ -60,11 +61,13 @@ export async function run() {
         `Persistent personal context layer for this user. Backend: ${desc.label}.\n\n` +
         "AT SESSION START, read the resource `nodus-context://brief` for always-on facts " +
         "(rules, preferences, identity) — these shape how the user expects you to behave.\n\n" +
-        "Use the tools to recall and save what you learn across sessions:\n" +
-        "  - list_context / search_context — pull relevant entries before answering\n" +
-        "  - read_context — fetch a specific entry by id\n" +
-        "  - write_context — save durable facts (use the `type` field: rule, preference, " +
-        "fact, decision, gotcha, project-state, reference)\n" +
+        "Default to the simple memory tools:\n" +
+        "  - recall_context — search or list remembered context\n" +
+        "  - remember_context — save durable natural-language memories without choosing ids, " +
+        "types, or tags unless you already know them\n\n" +
+        "Use the advanced tools only when you need exact control:\n" +
+        "  - list_context / search_context / read_context — inspect precise entries\n" +
+        "  - write_context — save to an exact id/type/tag set\n" +
         "  - confirm_context — call this before ending your turn on entries you actually cited; " +
         "it re-verifies them and records a confirmation\n" +
         "  - accept_context — user has said a failing verify is expected; mark it accepted so " +
@@ -73,11 +76,11 @@ export async function run() {
         "  - acknowledge_health — call this after mentioning brief health issues so they don't " +
         "reappear next session\n" +
         "  - list_tags — see existing tags before inventing new ones\n\n" +
-        "Entry id convention: path-style, e.g. `user/identity`, `preferences/communication`, " +
+        "Advanced entry id convention: path-style, e.g. `user/identity`, `preferences/communication`, " +
         "`projects/<name>`, `decisions/<date>-<topic>`. When superseding a prior entry, " +
         "pass its id in the `supersedes` field on write so the link is recorded.\n\n" +
         "DECIDING WHAT TO SAVE — the embarrassment test:\n" +
-        "  - Before calling `write_context`, ask: would I be embarrassed to make this same " +
+        "  - Before calling `remember_context` or `write_context`, ask: would I be embarrassed to make this same " +
         "mistake — or ask this same question — again next session? If yes, save. If no, skip.\n" +
         "  - Pass: capability false-negatives the user corrected (you said 'I can't do X' → user " +
         "said 'yes you can, here's how'), preference reveals, 'we tried that and it broke', " +
@@ -135,6 +138,73 @@ export async function run() {
     }
     return "mcp"
   }
+
+  server.registerTool(
+    "recall_context",
+    {
+      title: "Recall shared memory",
+      description:
+        "Easy-path memory read. Pass a query to search shared memory; omit query to list recent " +
+        "memories. Prefer this over search_context/list_context unless you need exact filters.",
+      inputSchema: {
+        query: z.string().optional().describe("Natural-language search query."),
+        scope: z
+          .enum(["global", "project", "workspace"])
+          .optional()
+          .describe("Optional coarse scope filter. Defaults to all scopes."),
+        limit: z.number().int().positive().max(50).optional(),
+      },
+    },
+    async ({ query, scope, limit }) => {
+      try {
+        return jsonResult(await recallContext(backend, { query, scope, limit }))
+      } catch (e) {
+        return errorResult(e)
+      }
+    },
+  )
+
+  server.registerTool(
+    "remember_context",
+    {
+      title: "Remember shared context",
+      description:
+        "Easy-path memory write. Save a durable natural-language memory; the server infers " +
+        "id, type, title, tags, and likely updates. Use write_context only when exact " +
+        "frontmatter control matters.",
+      inputSchema: {
+        text: z.string().min(1).describe("The memory to save, in plain language."),
+        scope: z
+          .enum(["global", "project", "workspace"])
+          .optional()
+          .describe("Where this memory applies. Defaults to global, or project for project-state."),
+        id: ID_FIELD.optional().describe("Optional exact id override."),
+        title: z.string().optional().describe("Optional title override."),
+        type: z
+          .string()
+          .optional()
+          .describe("Optional type override: rule, preference, fact, decision, gotcha, project-state, reference."),
+        tags: z.array(z.string()).optional().describe("Optional extra tags."),
+      },
+    },
+    async ({ text, scope, id, title, type, tags }) => {
+      try {
+        return jsonResult(
+          await rememberContext(backend, {
+            text,
+            scope,
+            id,
+            title,
+            type,
+            tags,
+            author: resolveAuthor(),
+          }),
+        )
+      } catch (e) {
+        return errorResult(e)
+      }
+    },
+  )
 
   server.registerTool(
     "list_context",

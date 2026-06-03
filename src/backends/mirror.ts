@@ -13,6 +13,7 @@ import {
   WriteInput,
 } from "./types.js"
 import { computeMemoryHealthDirect, type MemoryHealth, type HealthOptions } from "./health.js"
+import { toWriteInput } from "../sync.js"
 
 export interface MirrorBackendOptions {
   /** Backend used for reads (fast / local-first). Required. */
@@ -82,12 +83,35 @@ export class MirrorBackend implements ContextBackend {
   }
 
   async read(id: string): Promise<ContextEntry> {
+    let local: ContextEntry | undefined
     try {
-      return await this.#primary.read(id)
+      local = await this.#primary.read(id)
     } catch (e) {
       if (!(e instanceof ContextNotFoundError)) throw e
     }
-    // Fall through to secondary; cache into primary if found.
+
+    if (local) {
+      try {
+        const remote = await this.#secondary.read(id)
+        if (sameEntryContent(local, remote)) return local
+        if (isNewer(remote.updated, local.updated)) {
+          await this.#cachePrimary(remote)
+          return remote
+        }
+        if (isNewer(local.updated, remote.updated)) {
+          await this.#secondary.write(toWriteInput(local)).catch((e) => this.#onError(`read-sync ${id}`, e as Error))
+        }
+      } catch (e) {
+        if (!(e instanceof ContextNotFoundError)) {
+          this.#onError("read-check-secondary", e as Error)
+        } else {
+          await this.#secondary.write(toWriteInput(local)).catch((err) => this.#onError(`read-fill ${id}`, err as Error))
+        }
+      }
+      return local
+    }
+
+    // Local miss: fall through to secondary; cache into primary if found.
     let remote: ContextEntry
     try {
       remote = await this.#secondary.read(id)
@@ -99,29 +123,7 @@ export class MirrorBackend implements ContextBackend {
       this.#onError("read-fallback", e as Error)
       throw e
     }
-    try {
-      await this.#primary.write({
-        id: remote.id,
-        body: remote.body,
-        title: remote.title,
-        type: remote.type,
-        tags: remote.tags,
-        supersedes: remote.supersedes,
-        expires: remote.expires,
-        author: remote.author,
-        verify: remote.verify,
-        verifiedAt: remote.verifiedAt,
-        verifyStatus: remote.verifyStatus,
-        verifyMessage: remote.verifyMessage,
-        verifyAccepted: remote.verifyAccepted,
-        verifyAcceptedAt: remote.verifyAcceptedAt,
-        verifyAcceptedReason: remote.verifyAcceptedReason,
-        confirmations: remote.confirmations,
-      })
-    } catch (e) {
-      // Cache failure is non-fatal; we still return the entry.
-      this.#onError("read-cache", e as Error)
-    }
+    await this.#cachePrimary(remote)
     return remote
   }
 
@@ -162,7 +164,8 @@ export class MirrorBackend implements ContextBackend {
     try {
       const secondary = await this.#secondary.list(options)
       for (const e of secondary) {
-        if (!byId.has(e.id)) byId.set(e.id, e)
+        const existing = byId.get(e.id)
+        if (!existing || isNewer(e.updated, existing.updated)) byId.set(e.id, e)
       }
     } catch (e) {
       this.#onError("list", e as Error)
@@ -190,7 +193,9 @@ export class MirrorBackend implements ContextBackend {
     for (const hit of primary) byId.set(hit.entry.id, hit)
     for (const hit of secondary) {
       const existing = byId.get(hit.entry.id)
-      if (!existing || hit.score > existing.score) byId.set(hit.entry.id, hit)
+      if (!existing || isNewer(hit.entry.updated, existing.entry.updated) || hit.score > existing.score) {
+        byId.set(hit.entry.id, hit)
+      }
     }
     let merged = Array.from(byId.values())
     merged.sort((a, b) => b.score - a.score)
@@ -317,4 +322,23 @@ export class MirrorBackend implements ContextBackend {
     }
     return entry
   }
+
+  async #cachePrimary(entry: ContextEntry): Promise<void> {
+    try {
+      await this.#primary.write(toWriteInput(entry))
+    } catch (e) {
+      // Cache failure is non-fatal; we still return the entry.
+      this.#onError("read-cache", e as Error)
+    }
+  }
+}
+
+function isNewer(a: string | undefined, b: string | undefined): boolean {
+  if (!a) return false
+  if (!b) return true
+  return a > b
+}
+
+function sameEntryContent(a: ContextEntry, b: ContextEntry): boolean {
+  return JSON.stringify(toWriteInput(a)) === JSON.stringify(toWriteInput(b))
 }

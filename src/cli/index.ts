@@ -33,6 +33,7 @@ import { cmdJoin } from "./commands/join.js"
 import { cmdSetup } from "./commands/setup.js"
 import { cmdCapabilities } from "./commands/capabilities.js"
 import { cmdUpdate } from "./commands/update.js"
+import { cmdRecall, cmdRemember } from "./commands/memory.js"
 import { bold, cyan, dim, fail, info, yellow } from "./output.js"
 import { packageVersion } from "./version.js"
 import { readUpdateInfo, refreshUpdateInfo, upgradeHint } from "./update-check.js"
@@ -58,6 +59,12 @@ ${bold("Usage:")}
   ${cyan(cmd)} <command> [args]
 
 ${bold("Setup:")}
+  install [--agents=detected|all|none|<a,b>] [--json]
+                                   Simple default install: local memory + detected agents
+  connect <pairing-string>         Connect this machine to a shared server (mirror by default)
+  status [--json] [--memory]       Show whether memory + agent integrations are healthy
+  repair [--yes] [--dry-run] [--only=<id>]
+                                   Fix broken agent registrations
   init                             Interactive setup wizard
                                    (asks where context lives + which agents to install)
   setup --backend=local|server|mirror [--url=<u>] [--token=<t>]
@@ -92,6 +99,10 @@ ${bold("Profiles:")}
   config path                      Print path to config file
 
 ${bold("Entries:")}
+  remember <text> [--scope=global|project|workspace] [--type=T] [--tag=T] [--json]
+                                   Save a durable memory without choosing ids/frontmatter
+  recall [query] [--scope=global|project|workspace] [--limit=N] [--json]
+                                   Search memories, or list recent memories when query is omitted
   list [--prefix=X] [--tag=T] [--type=T]
                                    List entries
   show <id>                        Print one entry
@@ -130,10 +141,10 @@ ${bold("History:")}
 ${bold("Portability:")}
   export [--out=<file>]            Export all entries to JSON
   import <file> [--overwrite]      Import entries from a bundle
-  sync push|pull <other-profile> [--overwrite] [--dry-run] [-y]
-  sync push|pull --from=<p> --to=<p> [--overwrite] [--dry-run] [-y]
+  sync push|pull|reconcile <other-profile> [--overwrite] [--dry-run] [-y]
+  sync push|pull|reconcile --from=<p> --to=<p> [--overwrite] [--dry-run] [-y]
                                    Copy entries between profiles
-                                   (push: active→other; pull: other→active)
+                                   (push: active→other; pull: other→active; reconcile: both ways)
 
 ${bold("Other:")}
   path [<id>]                      Print disk path of root or an entry
@@ -160,6 +171,14 @@ async function main(argv: string[]): Promise<void> {
   }
 
   switch (cmd) {
+    case "install":
+      return cmdSetup(parseInstall(rest))
+    case "connect":
+      return cmdJoin(parseJoin(rest, "connect"))
+    case "status":
+      return cmdDoctor(parseDoctor(rest))
+    case "repair":
+      return runInit(parseRepair(rest))
     case "init":
       return runInit(parseInit(rest))
     case "uninstall":
@@ -198,6 +217,10 @@ async function main(argv: string[]): Promise<void> {
     }
     case "list":
       return cmdList(parseList(rest))
+    case "recall":
+      return cmdRecall(parseRecall(rest))
+    case "remember":
+      return cmdRemember(parseRemember(rest))
     case "show":
       return cmdShow(parseShow(rest))
     case "add":
@@ -293,6 +316,40 @@ function parseInit(args: string[]) {
     repair: parsed.values.repair,
     wizard: parsed.values.wizard,
     noWizard: parsed.values["no-wizard"],
+    dryRun: parsed.values["dry-run"],
+  }
+}
+
+function parseInstall(args: string[]) {
+  const parsed = parseArgs({
+    args,
+    options: {
+      agents: { type: "string" },
+      json: { type: "boolean" },
+    },
+    allowPositionals: true,
+  })
+  return {
+    backend: "local" as const,
+    agents: parsed.values.agents,
+    json: parsed.values.json,
+  }
+}
+
+function parseRepair(args: string[]) {
+  const parsed = parseArgs({
+    args,
+    options: {
+      yes: { type: "boolean", short: "y" },
+      only: { type: "string", multiple: true },
+      "dry-run": { type: "boolean" },
+    },
+    allowPositionals: true,
+  })
+  return {
+    repair: true,
+    yes: parsed.values.yes,
+    only: parsed.values.only,
     dryRun: parsed.values["dry-run"],
   }
 }
@@ -530,6 +587,59 @@ function parseSearch(args: string[]) {
   }
 }
 
+function parseRemember(args: string[]) {
+  const parsed = parseArgs({
+    args,
+    options: {
+      text: { type: "string" },
+      id: { type: "string" },
+      title: { type: "string" },
+      type: { type: "string" },
+      tag: { type: "string", multiple: true },
+      scope: { type: "string" },
+      author: { type: "string" },
+      json: { type: "boolean" },
+    },
+    allowPositionals: true,
+  })
+  const scope = parsed.values.scope
+  if (scope && !["global", "project", "workspace"].includes(scope)) {
+    fail("remember: --scope must be global, project, or workspace")
+  }
+  return {
+    text: parsed.values.text ?? parsed.positionals.join(" "),
+    id: parsed.values.id,
+    title: parsed.values.title,
+    type: parsed.values.type,
+    tag: parsed.values.tag,
+    scope: scope as "global" | "project" | "workspace" | undefined,
+    author: parsed.values.author,
+    json: parsed.values.json,
+  }
+}
+
+function parseRecall(args: string[]) {
+  const parsed = parseArgs({
+    args,
+    options: {
+      scope: { type: "string" },
+      limit: { type: "string" },
+      json: { type: "boolean" },
+    },
+    allowPositionals: true,
+  })
+  const scope = parsed.values.scope
+  if (scope && !["global", "project", "workspace"].includes(scope)) {
+    fail("recall: --scope must be global, project, or workspace")
+  }
+  return {
+    query: parsed.positionals.join(" ").trim() || undefined,
+    scope: scope as "global" | "project" | "workspace" | undefined,
+    limit: parsed.values.limit ? parseInt(parsed.values.limit, 10) : undefined,
+    json: parsed.values.json,
+  }
+}
+
 function parseTags(args: string[]) {
   const parsed = parseArgs({
     args,
@@ -682,7 +792,7 @@ function parseCapabilities(args: string[]) {
   return { json: parsed.values.json }
 }
 
-function parseJoin(args: string[]) {
+function parseJoin(args: string[], command = "join") {
   const parsed = parseArgs({
     args,
     options: {
@@ -693,7 +803,7 @@ function parseJoin(args: string[]) {
     allowPositionals: true,
   })
   const pairingString = parsed.positionals[0]
-  if (!pairingString) fail("join: missing <pairing-string>")
+  if (!pairingString) fail(`${command}: missing <pairing-string>`)
   return {
     pairingString,
     name: parsed.values.name,
@@ -763,8 +873,8 @@ function parseSync(args: string[]) {
     allowPositionals: true,
   })
   const direction = parsed.positionals[0]
-  if (direction !== "push" && direction !== "pull") {
-    fail("sync: first argument must be 'push' or 'pull'")
+  if (direction !== "push" && direction !== "pull" && direction !== "reconcile") {
+    fail("sync: first argument must be 'push', 'pull', or 'reconcile'")
   }
   const active = parsed.positionals[1] // optional: explicit other profile when from/to omitted
   let from = parsed.values.from
@@ -775,7 +885,7 @@ function parseSync(args: string[]) {
       fail("sync: provide --from and --to, or pass a profile name (active is the other side)")
     }
     // Resolve active profile lazily — keep parser pure here, sync command can call loadConfig.
-    if (direction === "push") {
+    if (direction === "push" || direction === "reconcile") {
       from = "__ACTIVE__"
       to = active
     } else {
@@ -785,7 +895,7 @@ function parseSync(args: string[]) {
   } else if (!from || !to) {
     fail("sync: pass both --from and --to, or use the shorthand: sync <push|pull> <other-profile>")
   }
-  return { direction: direction as "push" | "pull", from: from!, to: to!, overwrite: parsed.values.overwrite, dryRun: parsed.values["dry-run"], yes: parsed.values.yes }
+  return { direction: direction as "push" | "pull" | "reconcile", from: from!, to: to!, overwrite: parsed.values.overwrite, dryRun: parsed.values["dry-run"], yes: parsed.values.yes }
 }
 
 function parseImport(args: string[]) {

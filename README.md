@@ -28,7 +28,7 @@ Every agent you talk to starts from zero. Claude doesn't know what Cursor learne
 
 ```sh
 npm i -g @getnodus/context    # adds the `context` command to your $PATH
-context init                  # pick a backend, install for your detected agents
+context install               # local memory + detected agents
 ```
 
 Then restart your agents so they load the new MCP server, and they'll start reading and writing your context automatically.
@@ -37,17 +37,19 @@ Then restart your agents so they load the new MCP server, and they'll start read
 
 ```sh
 npm i -g @getnodus/context
-context init        # interactive: choose where context lives + which agents to install for
-context doctor      # show backend, integrations, and memory health
+context install     # simple default: local memory + detected agents
+context status      # show memory, integrations, and health
 ```
 
-`init` is interactive. For a non-interactive, scriptable setup (or if you're an AI assistant doing this for someone), use `setup` and see **[AGENTS.md](./AGENTS.md)**:
+`install` is the default path. For a scriptable setup with explicit backend choices
+(or if you're an AI assistant doing this for someone), use `setup` and see
+**[AGENTS.md](./AGENTS.md)**:
 
 ```sh
 context setup --backend=local --agents=detected --json
 ```
 
-Prefer not to install globally? `npx -p @getnodus/context context init` works too — the `-p` flag is needed because the binary (`context`) differs from the package name.
+Prefer not to install globally? `npx -p @getnodus/context context install` works too — the `-p` flag is needed because the binary (`context`) differs from the package name.
 
 After installing, reload each agent so it picks up the new MCP server:
 
@@ -69,7 +71,14 @@ Once installed, MCP clients see your context without any prompting from you:
 - `nodus-context://brief` — a digest of always-on context: rules, preferences, identity, plus a **This workspace** section of entries relevant to the repo the agent is currently in (matched against the MCP client's workspace roots, falling back to its working directory).
 - `nodus-context://entry/{id}` — one resource per entry, browseable.
 
-**Tools** (called as needed):
+**Simple tools** (the normal path for agents):
+
+| Tool | Purpose |
+| --- | --- |
+| `recall_context` | Search or list shared memory |
+| `remember_context` | Save a natural-language memory; Context infers ids, types, tags, and likely updates |
+
+**Advanced tools** (for precise maintenance or exact entry control):
 
 | Tool | Purpose |
 | --- | --- |
@@ -89,11 +98,11 @@ Once installed, MCP clients see your context without any prompting from you:
 The `context` command mirrors everything agents can do, plus setup and maintenance. A few common ones:
 
 ```sh
-context add preferences/communication --tag preferences   # create/update (stdin or $EDITOR)
-echo "Prefers terse responses" | context add preferences/communication --tag preferences
-context list --tag preferences        # list, filter by --prefix / --tag / --type / --author
-context search "amsterdam"            # lexical search (semantic if an embedder is configured)
-context show preferences/communication
+context remember "Prefers terse responses"
+context recall "communication style"
+context list --tag preferences        # advanced: filter by --prefix / --tag / --type / --author
+context search "amsterdam"            # advanced: lexical search (semantic if configured)
+context show preferences/prefers-terse-responses
 context list --json | jq .            # everything is pipe- and JSON-friendly
 ```
 
@@ -121,7 +130,24 @@ context profile add server --type=http --url=https://memory.example.com --token=
 context profile add work --type=module --path=@acme/context-backend-s3 --options='{"bucket":"..."}'
 ```
 
-Switch any time with `context use <profile>`; move data between backends with `context export` / `context import`. For multi-device setup, run `context-server install` on a box you own and paste its pairing string into `context join` on each client.
+Switch any time with `context use <profile>`; move data between backends with `context export` / `context import`. For multi-device setup, run `context-server install` on a box you own and paste its pairing string into `context connect` on each client. `connect` creates a mirror profile by default: local reads stay fast and offline-safe, and writes sync to the server.
+
+## Sharing memory
+
+Most people should use one of three modes:
+
+```sh
+context install
+# local-only memory on this device
+
+context-server install
+# run this once on the Mac or Linux box that should hold shared memory
+
+context connect nodus://...
+# run this on each client device; existing local memories are reconciled with the server
+```
+
+The recommended shared mode is **mirror**: every device keeps a local cache for fast offline reads, and writes are mirrored to the server. If local and server both have an entry, Context keeps the newer copy. Use `context sync reconcile <profile>` to manually reconcile two profiles, or `context status` to see whether the active profile is local-only, server-only, or mirrored.
 
 ## Entry types
 

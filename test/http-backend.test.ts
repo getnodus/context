@@ -91,6 +91,31 @@ test("[http] server rejects oversized request bodies with 413", async () => {
   }
 })
 
+test("[http] server returns 400 for malformed JSON and missing entry body", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "nodus-ctx-400-"))
+  const local = new LocalBackend({ rootDir: dir })
+  await local.init()
+  const server = await startStubServer(local)
+  try {
+    const malformed = await fetch(`${server.url}/entries/bad/json`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: "{nope",
+    })
+    assert.equal(malformed.status, 400)
+
+    const missingBody = await fetch(`${server.url}/entries/bad/body`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ title: "Missing body" }),
+    })
+    assert.equal(missingBody.status, 400)
+  } finally {
+    await server.close()
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
 test("[http] surfaces server timeout as BackendError", async () => {
   // Server that never responds
   const { createServer } = await import("node:http")

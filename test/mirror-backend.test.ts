@@ -83,6 +83,35 @@ test("[mirror] list merges unique ids from both", async () => {
   }
 })
 
+test("[mirror] read returns newer secondary copy and refreshes primary", async () => {
+  const { mirror, primary, secondary, cleanup } = await setupPair()
+  try {
+    await primary.write({ id: "shared", body: "old local" })
+    await new Promise((r) => setTimeout(r, 10))
+    await secondary.write({ id: "shared", body: "new remote" })
+
+    const got = await mirror.read("shared")
+    assert.equal(got.body, "new remote")
+    assert.equal((await primary.read("shared")).body, "new remote")
+  } finally {
+    await cleanup()
+  }
+})
+
+test("[mirror] list prefers newer duplicate summary", async () => {
+  const { mirror, primary, secondary, cleanup } = await setupPair()
+  try {
+    await primary.write({ id: "same", body: "old local" })
+    await new Promise((r) => setTimeout(r, 10))
+    await secondary.write({ id: "same", body: "new remote" })
+
+    const [entry] = await mirror.list({ sort: "id-asc" })
+    assert.equal(entry.preview, "new remote")
+  } finally {
+    await cleanup()
+  }
+})
+
 test("[mirror] delete removes from both", async () => {
   const { mirror, primary, secondary, cleanup } = await setupPair()
   try {
