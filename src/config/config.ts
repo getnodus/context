@@ -10,7 +10,7 @@ export interface NodusConfig {
   profiles: Record<string, Profile>
   /**
    * User-declared MCP agents. Loaded in addition to the built-in registry.
-   * Use this to teach `nodus-context` about an MCP client we don't ship
+   * Use this to teach `context` about an MCP client we don't ship
    * built-in support for, without forking. An entry whose id matches a
    * built-in shadows the built-in (useful for overriding a config path).
    */

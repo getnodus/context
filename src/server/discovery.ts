@@ -21,7 +21,7 @@ type MdnsService = any  // eslint-disable-line @typescript-eslint/no-explicit-an
  * mDNS service name. Conventional `_<name>._tcp.local` shape so any
  * standard Bonjour/Avahi browser can find us too.
  */
-export const SERVICE_TYPE = "nodus-context"
+export const SERVICE_TYPE = "context"
 
 export interface AdvertiseOptions {
   /** Display name. Defaults to the OS hostname. */
@@ -49,7 +49,7 @@ export interface AdvertiseHandle {
  */
 export function startAdvertising(options: AdvertiseOptions): AdvertiseHandle {
   const bonjour = new Bonjour()
-  const name = options.name ?? `nodus-context @ ${hostname()}`
+  const name = options.name ?? `context @ ${hostname()}`
   let service: MdnsService | undefined
   try {
     service = bonjour.publish({
@@ -91,7 +91,7 @@ export interface BrowseOptions {
 }
 
 /**
- * Scan the local network for advertised nodus-context servers.
+ * Scan the local network for advertised context servers.
  * Resolves after `timeoutMs` with everything seen. Best-effort —
  * an empty array on a network without multicast is a normal outcome.
  */

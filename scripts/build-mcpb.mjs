@@ -10,7 +10,7 @@
  * delegates to `npx @getnodus/context` so behavior matches a normal npm
  * install.
  *
- * Output: `dist/nodus-context-<version>.mcpb` — upload to GitHub Releases.
+ * Output: `dist/context-<version>.mcpb` — upload to GitHub Releases.
  */
 import { readFile, writeFile, mkdir, rm, copyFile } from "node:fs/promises"
 import { fileURLToPath } from "node:url"
@@ -26,7 +26,7 @@ await mkdir(stageDir, { recursive: true })
 
 const manifest = {
   manifest_version: "0.3",
-  name: "nodus-context",
+  name: "context",
   display_name: "Nodus Context",
   version: pkg.version,
   description: pkg.description,
@@ -34,7 +34,7 @@ const manifest = {
     "Personal context layer for AI agents. Stores user identity, preferences, " +
     "and project state so every agent picks up where the last one left off. " +
     "Exposes read_context / write_context / search_context / list_context / " +
-    "list_tags / delete_context as MCP tools, plus a nodus-context://brief " +
+    "list_tags / delete_context as MCP tools, plus a context://brief " +
     "resource auto-loaded at session start. Storage is pluggable: local " +
     "markdown files by default, or any HTTP backend speaking the Nodus " +
     "Context Protocol.",
@@ -49,7 +49,7 @@ const manifest = {
     entry_point: "npx",
     mcp_config: {
       command: "npx",
-      args: ["-y", "--package", "@getnodus/context", "nodus-context-mcp"],
+      args: ["-y", "--package", "@getnodus/context", "context-mcp"],
       env: {},
     },
   },
@@ -66,7 +66,7 @@ await copyFile(
   join(stageDir, "icon.png"),
 )
 
-const out = join(root, "dist", `nodus-context-${pkg.version}.mcpb`)
+const out = join(root, "dist", `context-${pkg.version}.mcpb`)
 await rm(out, { force: true })
 
 // Pinned so release output is reproducible — unpinned `npx -y mcpb` would

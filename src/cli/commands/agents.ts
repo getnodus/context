@@ -28,7 +28,7 @@ export async function cmdAgentsList(args: AgentsListArgs): Promise<void> {
   }
   info("")
   info(dim("● = app installed, ○ = not detected"))
-  info(dim("add custom agents with: nodus-context agents add <id> --name=... --json-path=... [--detect-app=Name] [--detect-cmd=name] [--key=mcpServers]"))
+  info(dim("add custom agents with: context agents add <id> --name=... --json-path=... [--detect-app=Name] [--detect-cmd=name] [--key=mcpServers]"))
 }
 
 export interface AgentsAddArgs {

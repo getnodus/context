@@ -14,7 +14,15 @@ import {
   InstallYamlMerge,
 } from "./types.js"
 
-export const MCP_KEY = "nodus-context"
+export const MCP_KEY = "context"
+
+/**
+ * Pre-rename server key. We registered under `nodus-context` before the
+ * rebrand; install/repair sweeps any leftover entry so upgraders don't end
+ * up with two servers (the old `nodus-context` and the new `context`) both
+ * pointing at the same backend.
+ */
+export const LEGACY_MCP_KEY = "nodus-context"
 
 export interface McpCommand {
   command: string
@@ -314,6 +322,7 @@ async function writeJsonMerge(
   else if (sameCommand(existing, cmd)) status = "already-installed"
   else status = "updated"
   node[MCP_KEY] = toEntryShape(cmd, spec.entryShape)
+  delete node[LEGACY_MCP_KEY]
   await writeJsonConfig(path, data)
   return { status }
 }
@@ -427,6 +436,11 @@ async function writeYamlMerge(
     if (!isSeq(seq)) {
       doc.setIn(keyPath, [entry])
     } else {
+      // Drop any pre-rename entry before writing the current one.
+      const legacyIdx = seq.items.findIndex(
+        (it) => isMap(it) && String(it.get("name")) === LEGACY_MCP_KEY,
+      )
+      if (legacyIdx >= 0) seq.items.splice(legacyIdx, 1)
       const idx = seq.items.findIndex(
         (it) => isMap(it) && String(it.get("name")) === MCP_KEY,
       )
@@ -436,6 +450,7 @@ async function writeYamlMerge(
     }
   } else {
     doc.setIn([...keyPath, MCP_KEY], entry)
+    doc.deleteIn([...keyPath, LEGACY_MCP_KEY])
   }
 
   await writeTextConfig(path, String(doc))
@@ -527,8 +542,10 @@ async function writeCliMcp(
   }
   const flags = spec.scopeFlags ?? []
   // Remove first so the new args fully replace the old; ignore failure
-  // (most CLIs exit non-zero when nothing was registered).
+  // (most CLIs exit non-zero when nothing was registered). Also sweep the
+  // pre-rename `nodus-context` server so upgraders aren't left with both.
   await runQuiet(spec.binary, ["mcp", "remove", ...flags, MCP_KEY])
+  await runQuiet(spec.binary, ["mcp", "remove", ...flags, LEGACY_MCP_KEY])
   const args = ["mcp", "add", ...flags, MCP_KEY, "--", cmd.command, ...cmd.args]
   const result = await runQuiet(spec.binary, args)
   if (result.code !== 0) {
@@ -579,7 +596,7 @@ export async function inspectMcpHealth(cmd: McpCommand): Promise<McpHealth> {
 export function mcpCommandNpx(): McpCommand {
   return {
     command: "npx",
-    args: ["-y", "--package", "@getnodus/context", "nodus-context-mcp"],
+    args: ["-y", "--package", "@getnodus/context", "context-mcp"],
   }
 }
 

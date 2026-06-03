@@ -147,8 +147,8 @@ test("OpenCode entryShape writes {type, command-as-array, enabled} and reads bac
 
     // On disk: OpenCode shape — single `command` array, `type: "local"`, `enabled: true`.
     const raw = JSON.parse(await readFile(mcpFile, "utf8"))
-    const entry = raw.mcp?.["nodus-context"]
-    assert.ok(entry, "entry should land under mcp.nodus-context")
+    const entry = raw.mcp?.["context"]
+    assert.ok(entry, "entry should land under mcp.context")
     assert.equal(entry.type, "local")
     assert.equal(entry.enabled, true)
     assert.ok(Array.isArray(entry.command), "command should be a single array")
@@ -169,7 +169,7 @@ test("OpenCode entryShape writes {type, command-as-array, enabled} and reads bac
     // Uninstall removes the key cleanly.
     assert.equal(await uninstallAgent(resolved), true)
     const after = JSON.parse(await readFile(mcpFile, "utf8"))
-    assert.equal(after.mcp?.["nodus-context"], undefined)
+    assert.equal(after.mcp?.["context"], undefined)
   })
 })
 
@@ -186,7 +186,7 @@ test("Zed-style keyPath ('context_servers') is honoured", async () => {
     const resolved = mkResolved(def)
     await installAgent(resolved, mcpCommandNpx())
     const raw = JSON.parse(await readFile(mcpFile, "utf8"))
-    assert.ok(raw.context_servers?.["nodus-context"], "entry should land under context_servers")
+    assert.ok(raw.context_servers?.["context"], "entry should land under context_servers")
     assert.equal(raw.mcpServers, undefined)
   })
 })
@@ -206,7 +206,7 @@ test("VS Code entryShape writes `type: stdio` under `servers` and round-trips", 
     await installAgent(resolved, cmd)
 
     const raw = JSON.parse(await readFile(mcpFile, "utf8"))
-    const entry = raw.servers?.["nodus-context"]
+    const entry = raw.servers?.["context"]
     assert.ok(entry, "entry should land under servers")
     assert.equal(entry.type, "stdio", "VS Code entries carry an explicit type: stdio")
     assert.equal(entry.command, cmd.command)
@@ -224,7 +224,7 @@ test("VS Code entryShape writes `type: stdio` under `servers` and round-trips", 
 
     assert.equal(await uninstallAgent(resolved), true)
     const after = JSON.parse(await readFile(mcpFile, "utf8"))
-    assert.equal(after.servers?.["nodus-context"], undefined)
+    assert.equal(after.servers?.["context"], undefined)
   })
 })
 
@@ -243,7 +243,7 @@ test("Jan entryShape writes `active: true` and round-trips to canonical", async 
     await installAgent(resolved, cmd)
 
     const raw = JSON.parse(await readFile(mcpFile, "utf8"))
-    const entry = raw.mcpServers?.["nodus-context"]
+    const entry = raw.mcpServers?.["context"]
     assert.ok(entry, "entry should land under mcpServers")
     assert.equal(entry.active, true, "Jan entries are enabled with active: true")
     assert.equal(entry.command, cmd.command)
@@ -276,7 +276,7 @@ test("5ire entryShape writes `isActive: true` and round-trips to canonical", asy
     await installAgent(resolved, cmd)
 
     const raw = JSON.parse(await readFile(mcpFile, "utf8"))
-    const entry = raw.mcpServers?.["nodus-context"]
+    const entry = raw.mcpServers?.["context"]
     assert.ok(entry, "entry should land under mcpServers")
     assert.equal(entry.isActive, true, "5ire entries are auto-connected with isActive: true")
     assert.equal(entry.command, cmd.command)
@@ -339,7 +339,7 @@ test("BoltAI install + read + uninstall round-trip (canonical mcpServers)", asyn
     assert.equal((await installAgent(resolved, cmd)).status, "installed")
 
     const raw = JSON.parse(await readFile(mcpFile, "utf8"))
-    const entry = raw.mcpServers?.["nodus-context"]
+    const entry = raw.mcpServers?.["context"]
     assert.ok(entry, "entry should land under mcpServers")
     assert.equal(entry.command, cmd.command)
     assert.deepEqual(entry.args, cmd.args)
@@ -389,7 +389,7 @@ test("Witsy install + read + uninstall round-trip (top-level mcpServers map)", a
 
     const raw = JSON.parse(await readFile(settingsFile, "utf8"))
     assert.equal(raw.general?.theme, "dark", "unrelated settings should be preserved")
-    const entry = raw.mcpServers?.["nodus-context"]
+    const entry = raw.mcpServers?.["context"]
     assert.ok(entry, "entry should land under top-level mcpServers")
     assert.equal(entry.command, cmd.command)
     assert.deepEqual(entry.args, cmd.args)
@@ -452,9 +452,9 @@ test("readMcp tolerates JSONC (comments + trailing commas)", async () => {
     const jsonc = `{
   // user settings
   "context_servers": {
-    "nodus-context": {
+    "context": {
       "command": "npx",
-      "args": ["-y", "--package", "@getnodus/context", "nodus-context-mcp"],
+      "args": ["-y", "--package", "@getnodus/context", "context-mcp"],
     },
   },
   /* block
@@ -544,7 +544,7 @@ test("Continue yaml-merge: upsert into mcpServers sequence, preserve siblings + 
     }
     assert.equal(doc.name, "my-assistant", "unrelated top-level keys should be preserved")
     assert.equal(doc.models.length, 1, "existing models should be preserved")
-    const ours = doc.mcpServers.find((s) => s.name === "nodus-context")
+    const ours = doc.mcpServers.find((s) => s.name === "context")
     const other = doc.mcpServers.find((s) => s.name === "other-server")
     assert.ok(other, "the pre-existing server should still be there")
     assert.ok(ours, "our server should be appended to the sequence")
@@ -562,7 +562,7 @@ test("Continue yaml-merge: upsert into mcpServers sequence, preserve siblings + 
       mcpServers: Array<{ name: string }>
     }
     assert.equal(
-      after.mcpServers.filter((s) => s.name === "nodus-context").length,
+      after.mcpServers.filter((s) => s.name === "context").length,
       1,
       "re-install must upsert, not append a duplicate",
     )
@@ -572,7 +572,7 @@ test("Continue yaml-merge: upsert into mcpServers sequence, preserve siblings + 
     const removed = parseYaml(await readFile(cfg, "utf8")) as {
       mcpServers: Array<{ name: string }>
     }
-    assert.equal(removed.mcpServers.find((s) => s.name === "nodus-context"), undefined)
+    assert.equal(removed.mcpServers.find((s) => s.name === "context"), undefined)
     assert.ok(removed.mcpServers.find((s) => s.name === "other-server"), "sibling must remain")
     assert.equal(await readMcp(resolved), undefined)
   })
@@ -622,7 +622,7 @@ test("Goose yaml-merge: extensions map with cmd/type/enabled/timeout, round-trip
       extensions: Record<string, Record<string, unknown>>
     }
     assert.ok(doc.extensions.developer, "the pre-existing extension should be preserved")
-    const entry = doc.extensions["nodus-context"]
+    const entry = doc.extensions["context"]
     assert.ok(entry, "our extension should be added under its name")
     assert.equal(entry.type, "stdio")
     assert.equal(entry.cmd, cmd.command, "Goose uses `cmd`, not `command`")
@@ -642,7 +642,7 @@ test("Goose yaml-merge: extensions map with cmd/type/enabled/timeout, round-trip
     const after = parseYaml(await readFile(cfg, "utf8")) as {
       extensions: Record<string, unknown>
     }
-    assert.equal(after.extensions["nodus-context"], undefined)
+    assert.equal(after.extensions["context"], undefined)
     assert.ok(after.extensions.developer, "sibling extension must remain after uninstall")
   })
 })

@@ -6,7 +6,7 @@ You are an AI assistant. A human has asked you to set up or interact with `@getn
 
 A personal-context layer for MCP-speaking AI agents. It exposes simple shared-memory tools (`recall_context` / `remember_context`) plus advanced entry-management tools (`read_context` / `write_context` / `search_context`, and friends) so every agent the user runs — Claude Desktop, Claude Code, Codex CLI, Cursor, Cline, Windsurf, Zed — reads and writes through one shared store.
 
-The CLI is **`context`** (e.g. `context doctor`). The legacy name `nodus-context` is kept as an alias for existing installs and shell history; new scripts and your instructions to users should always use `context`.
+The CLI is **`context`** (e.g. `context doctor`), and it registers an MCP server also named `context`. Earlier releases used the name `nodus-context` for both the binary and the server; that name is retired, and `context install` migrates an existing setup over automatically.
 
 The store is one of:
 
@@ -108,10 +108,10 @@ The setup is one-time. The bulk of your interaction is reading and writing entri
 | `acknowledge_health([keys])` | Call after mentioning brief health issues so they don't reappear next session. |
 | `delete_context(id)` | Only when the user explicitly asks to remove an entry. Prefer `write_context` to revise, or `accept_context` to silence a failing verify. The local backend keeps a snapshot for `context revert <id>` if the user changes their mind. |
 
-Resources (read directly, no tool call needed): `nodus-context://brief` (auto-loaded at session start), `nodus-context://entry/{id}` (one per entry).
+Resources (read directly, no tool call needed): `context://brief` (auto-loaded at session start), `context://entry/{id}` (one per entry).
 
 ### At session start
-Read the `nodus-context://brief` resource. It gives you rules (always-on directives), preferences (soft preferences), identity, and a `## Memory health` section listing problems the user should be aware of. The brief is loaded automatically by most clients; if yours doesn't, read it explicitly.
+Read the `context://brief` resource. It gives you rules (always-on directives), preferences (soft preferences), identity, and a `## Memory health` section listing problems the user should be aware of. The brief is loaded automatically by most clients; if yours doesn't, read it explicitly.
 
 ### Deciding what to save — the embarrassment test
 Before calling `remember_context` or `write_context`, ask: *"Would I be embarrassed to make this same mistake — or ask this same question — again next session?"* If yes, save. If no, skip.

@@ -8,7 +8,7 @@ import { bold, cyan, dim, green, info, red, yellow } from "../cli/output.js"
 import { packageVersion } from "../cli/version.js"
 import { encodePairing } from "./pairing.js"
 
-const SERVICE_NAME = "nodus-context"
+const SERVICE_NAME = "context"
 
 export interface InstallOptions {
   /** Non-interactive mode: use flags + defaults, never prompt. */
@@ -48,13 +48,13 @@ interface InstallResult {
  * value in pretending to authenticate something only localhost reaches.
  */
 export async function runServerInstall(opts: InstallOptions): Promise<InstallResult> {
-  info(bold(`\nnodus-context-server install  ${dim(`v${packageVersion()}`)}`))
-  info(dim("Set up nodus-context as a persistent service on this machine.\n"))
+  info(bold(`\ncontext-server install  ${dim(`v${packageVersion()}`)}`))
+  info(dim("Set up context as a persistent service on this machine.\n"))
 
   // ----- root dir -----
   const defaultRoot =
     platform() === "linux"
-      ? "/srv/nodus-context"
+      ? "/srv/context"
       : join(homedir(), ".nodus", "context")
   const rootDir =
     opts.rootDir ?? (opts.yes ? defaultRoot : await ask("Data directory", { default: defaultRoot }))
@@ -145,7 +145,7 @@ export async function runServerInstall(opts: InstallOptions): Promise<InstallRes
           opts.unitDirOverride ?? join(homedir(), "Library", "LaunchAgents"),
       })
     } else {
-      info(yellow(`service install not supported on ${platform()}; you'll need to run nodus-context-server manually`))
+      info(yellow(`service install not supported on ${platform()}; you'll need to run context-server manually`))
     }
   }
 
@@ -211,7 +211,7 @@ async function writeSystemdUnit(opts: {
     "Type=simple",
     `User=${user}`,
     ...(opts.token ? [`EnvironmentFile=${envFilePath}`] : []),
-    `ExecStart=/usr/bin/env nodus-context-server --host ${opts.host} --port ${opts.port} --root ${opts.rootDir}`,
+    `ExecStart=/usr/bin/env context-server --host ${opts.host} --port ${opts.port} --root ${opts.rootDir}`,
     "Restart=on-failure",
     "RestartSec=5",
     "StandardOutput=journal",
@@ -249,7 +249,7 @@ async function writeLaunchdPlist(opts: {
   const label = "co.nodus.context"
   const plistPath = join(opts.plistDir, `${label}.plist`)
   const args = [
-    "nodus-context-server",
+    "context-server",
     "--host",
     opts.host,
     "--port",

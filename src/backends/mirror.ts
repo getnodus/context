@@ -48,7 +48,7 @@ export class MirrorBackend implements ContextBackend {
       options.onSecondaryError ??
       ((op, e) => {
         process.stderr.write(
-          `[nodus-context] mirror secondary failed during ${op}: ${e.message}\n`,
+          `[context] mirror secondary failed during ${op}: ${e.message}\n`,
         )
       })
   }

@@ -191,7 +191,7 @@ Clients that have already run verify locally SHOULD send `verifyStatus` (and `ve
 
 ### `GET /health`
 
-Returns a memory health audit — surfaces what's been silently accumulating. Used by `nodus-context doctor --memory` and the MCP server's `nodus-context://brief` resource so HTTP clients don't have to compute it client-side.
+Returns a memory health audit — surfaces what's been silently accumulating. Used by `context doctor --memory` and the MCP server's `context://brief` resource so HTTP clients don't have to compute it client-side.
 
 Response shape:
 

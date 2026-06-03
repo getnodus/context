@@ -64,7 +64,7 @@ export async function cmdJoin(args: JoinArgs): Promise<void> {
       process.stdout.write(JSON.stringify(result, null, 2) + "\n")
       process.exit(1)
     }
-    info(bold("nodus-context join"))
+    info(bold("context join"))
     info(`  ${dim("url      →")} ${cyan(pairing!.url)}${pairing!.token ? dim(" (auth)") : ""}`)
     info(`  ${dim("reachable→")} ${probeResult.reachable ? green("yes") : red("no")}`)
     info(red(`  not configured: ${probeResult.error ?? "server probe failed"}`))
@@ -96,7 +96,7 @@ export async function cmdJoin(args: JoinArgs): Promise<void> {
         process.stdout.write(JSON.stringify(result, null, 2) + "\n")
         process.exit(1)
       }
-      info(bold("nodus-context join"))
+      info(bold("context join"))
       info(`  ${dim("profile  →")} ${cyan(profileName)} ${dim("(mirror)")}`)
       info(`  ${dim("url      →")} ${cyan(pairing!.url)}${pairing!.token ? dim(" (auth)") : ""}`)
       info(`  ${dim("reachable→")} ${green("yes")}`)
@@ -128,7 +128,7 @@ export async function cmdJoin(args: JoinArgs): Promise<void> {
     return
   }
 
-  info(bold("nodus-context join"))
+  info(bold("context join"))
   info(`  ${dim("profile  →")} ${cyan(profileName)} ${dim("(mirror, active)")}`)
   info(`  ${dim("url      →")} ${cyan(pairing!.url)}${pairing!.token ? dim(" (auth)") : ""}`)
   info(`  ${dim("reachable→")} ${probeResult.reachable ? green("yes") : red("no")}`)

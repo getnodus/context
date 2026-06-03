@@ -44,8 +44,8 @@ test("installMcp creates config and writes server entry", async () => {
     assert.equal(result.status, "installed")
 
     const parsed = JSON.parse(await readFile(configPath, "utf8"))
-    assert.ok(parsed.mcpServers["nodus-context"])
-    assert.equal(parsed.mcpServers["nodus-context"].command, "npx")
+    assert.ok(parsed.mcpServers["context"])
+    assert.equal(parsed.mcpServers["context"].command, "npx")
   } finally {
     await cleanup()
   }
@@ -89,7 +89,7 @@ test("installMcp preserves other mcpServers entries", async () => {
     await installMcp(target, mcpCommand())
     const parsed = JSON.parse(await readFile(configPath, "utf8"))
     assert.ok(parsed.mcpServers["some-other"])
-    assert.ok(parsed.mcpServers["nodus-context"])
+    assert.ok(parsed.mcpServers["context"])
     assert.equal(parsed.otherKey, "preserved")
   } finally {
     await cleanup()
@@ -115,7 +115,7 @@ test("installMcp respects keyPath override", async () => {
   try {
     await installMcp(target, mcpCommand())
     const parsed = JSON.parse(await readFile(configPath, "utf8"))
-    assert.ok(parsed.context_servers["nodus-context"], "entry should land under context_servers")
+    assert.ok(parsed.context_servers["context"], "entry should land under context_servers")
     assert.equal(parsed.mcpServers, undefined, "mcpServers key should not be created")
   } finally {
     await cleanup()
@@ -128,7 +128,7 @@ test("installMcp creates nested keyPath chain", async () => {
   try {
     await installMcp(target, mcpCommand())
     const parsed = JSON.parse(await readFile(configPath, "utf8"))
-    assert.ok(parsed.nested.deep.servers["nodus-context"])
+    assert.ok(parsed.nested.deep.servers["context"])
   } finally {
     await cleanup()
   }

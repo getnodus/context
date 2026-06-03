@@ -59,7 +59,7 @@ export function detectInstallSite(): InstallSite {
     return {
       mode: "brew",
       path,
-      command: { cmd: "brew", args: ["upgrade", "nodus-context"] },
+      command: { cmd: "brew", args: ["upgrade", "context"] },
     }
   }
   // pnpm globals live under e.g. ~/Library/pnpm or ~/.local/share/pnpm.
@@ -150,7 +150,7 @@ export async function cmdUpdate(args: UpdateArgs = {}): Promise<void> {
     info("")
     info(yellow("Running via npx — there's no global install to upgrade."))
     info(dim("npx caches packages locally. Force a fresh fetch with:"))
-    info(`  ${cyan(`npx --yes --package=${PKG_NAME}@latest nodus-context --version`)}`)
+    info(`  ${cyan(`npx --yes --package=${PKG_NAME}@latest context --version`)}`)
     return
   }
 
@@ -162,7 +162,7 @@ export async function cmdUpdate(args: UpdateArgs = {}): Promise<void> {
     info(`  ${cyan(`npm install -g ${PKG_NAME}@latest`)}`)
     info(`  ${cyan(`pnpm add -g ${PKG_NAME}@latest`)}`)
     info(`  ${cyan(`yarn global add ${PKG_NAME}@latest`)}`)
-    info(`  ${cyan(`brew upgrade nodus-context`)}  ${dim("(if installed via Homebrew formula)")}`)
+    info(`  ${cyan(`brew upgrade context`)}  ${dim("(if installed via Homebrew formula)")}`)
     return
   }
 

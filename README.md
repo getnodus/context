@@ -56,11 +56,11 @@ After installing, reload each agent so it picks up the new MCP server:
 - **Claude Desktop / Cursor / Cline / Windsurf / Zed** — quit and relaunch.
 - **Claude Code / Codex CLI** — exit the session and start a new one.
 
-> The legacy `nodus-context` command still works as an alias, so existing shell history and CI keep running. New scripts should use `context`.
+> The command and MCP server are both named `context`. (Earlier releases shipped a `nodus-context` binary and registered the server under that name — both are gone; running `context install` migrates an existing setup over automatically.)
 
 ### Claude Desktop with the Nodus icon
 
-Claude Desktop shows a custom server icon only when installed as a Desktop Extension (`.mcpb`). Download `nodus-context-<version>.mcpb` from the [latest release](https://github.com/getnodus/context/releases/latest) and double-click it — Claude Desktop opens an install dialog with the Nodus avatar. The server still runs via `npx @getnodus/context`, so behavior is identical to a normal install. Other clients render the icon automatically via the [MCP icon spec](https://modelcontextprotocol.io/specification/2025-06-18/schema); no config needed.
+Claude Desktop shows a custom server icon only when installed as a Desktop Extension (`.mcpb`). Download `context-<version>.mcpb` from the [latest release](https://github.com/getnodus/context/releases/latest) and double-click it — Claude Desktop opens an install dialog with the Nodus avatar. The server still runs via `npx @getnodus/context`, so behavior is identical to a normal install. Other clients render the icon automatically via the [MCP icon spec](https://modelcontextprotocol.io/specification/2025-06-18/schema); no config needed.
 
 ## How agents use it
 
@@ -68,8 +68,8 @@ Once installed, MCP clients see your context without any prompting from you:
 
 **Resources** (auto-loaded at session start by most clients):
 
-- `nodus-context://brief` — a digest of always-on context: rules, preferences, identity, plus a **This workspace** section of entries relevant to the repo the agent is currently in (matched against the MCP client's workspace roots, falling back to its working directory).
-- `nodus-context://entry/{id}` — one resource per entry, browseable.
+- `context://brief` — a digest of always-on context: rules, preferences, identity, plus a **This workspace** section of entries relevant to the repo the agent is currently in (matched against the MCP client's workspace roots, falling back to its working directory).
+- `context://entry/{id}` — one resource per entry, browseable.
 
 **Simple tools** (the normal path for agents):
 

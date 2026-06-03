@@ -9,7 +9,7 @@ export interface UninstallOptions {
 }
 
 export async function runUninstall(opts: UninstallOptions): Promise<void> {
-  info(bold("nodus-context uninstall"))
+  info(bold("context uninstall"))
   if (opts.dryRun) info(yellow("dry-run: no changes will be written"))
   info("")
 
@@ -22,7 +22,7 @@ export async function runUninstall(opts: UninstallOptions): Promise<void> {
     return
   }
 
-  // Figure out which targets actually have nodus-context configured.
+  // Figure out which targets actually have context configured.
   const configured: typeof targets = []
   for (const t of targets) {
     try {
@@ -34,7 +34,7 @@ export async function runUninstall(opts: UninstallOptions): Promise<void> {
   }
 
   if (configured.length === 0) {
-    info(dim("nodus-context is not configured in any agent — nothing to do"))
+    info(dim("context is not configured in any agent — nothing to do"))
     return
   }
 
@@ -47,7 +47,7 @@ export async function runUninstall(opts: UninstallOptions): Promise<void> {
   const names = configured.map((t) => t.name).join(", ")
   if (!opts.yes && !opts.dryRun) {
     const ok = await confirm(
-      `Remove nodus-context MCP server from: ${names}?`,
+      `Remove context MCP server from: ${names}?`,
       false,
     )
     if (!ok) {

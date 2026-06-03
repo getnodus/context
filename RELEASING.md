@@ -35,7 +35,7 @@ The tag push is the maintainer-controlled gate. Contributors bumping `package.js
 
 4. **Verify.** After the workflow goes green:
    - `npm view @getnodus/context version` returns `X.Y.Z`.
-   - https://github.com/getnodus/context/releases/tag/vX.Y.Z shows the release with `nodus-context-X.Y.Z.mcpb` attached and a linked Announcement discussion.
+   - https://github.com/getnodus/context/releases/tag/vX.Y.Z shows the release with `context-X.Y.Z.mcpb` attached and a linked Announcement discussion.
 
 The README points at `releases/latest` for the Claude Desktop bundle, so **every release must attach the `.mcpb`** — otherwise that link 404s for users. The workflow handles this; the failure mode to watch for is the `gh release create` step erroring out (commonly: missing `discussions: write` permission, or the Announcements category not existing yet).
 
@@ -46,7 +46,7 @@ Before tagging, you can reproduce what CI will do:
 ```sh
 pnpm install --frozen-lockfile
 pnpm test          # also builds
-pnpm build:mcpb    # writes dist/nodus-context-X.Y.Z.mcpb
+pnpm build:mcpb    # writes dist/context-X.Y.Z.mcpb
 ```
 
 Do **not** run `npm publish` locally — Trusted Publishers expects the publish to come from the GitHub Actions OIDC context, so a local publish would either fail or require a personal token that we don't want floating around. If you genuinely need to bypass CI (broken Actions, npm outage), use a short-lived **Automation** token scoped to `@getnodus/context` and revoke it immediately afterward.
@@ -64,7 +64,7 @@ The tag has already shipped but CI failed. Common causes and fixes:
 
 - **`gh release create` failed** (e.g. discussion permission). The package is already on npm at that point. Create the release manually:
   ```sh
-  gh release create vX.Y.Z dist/nodus-context-X.Y.Z.mcpb \
+  gh release create vX.Y.Z dist/context-X.Y.Z.mcpb \
     --title "vX.Y.Z" \
     --notes-from-tag \
     --discussion-category Announcements

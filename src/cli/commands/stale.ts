@@ -34,8 +34,8 @@ export async function cmdStale(args: { days?: number; json?: boolean }): Promise
       info(`  ${cyan(e.id)}  ${dim(`last touch ${last.slice(0, 10)}`)}`)
     }
     info("")
-    info(dim(`review with: nodus-context show <id>`))
-    info(dim(`delete with: nodus-context delete <id>`))
+    info(dim(`review with: context show <id>`))
+    info(dim(`delete with: context delete <id>`))
   }
   if (expired.length === 0 && stale.length === 0) {
     info(dim("nothing stale"))

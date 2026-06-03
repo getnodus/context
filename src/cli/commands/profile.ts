@@ -16,7 +16,7 @@ export async function cmdProfileList(args: { json?: boolean }): Promise<void> {
   }
   info("")
   info(dim(`active: ${config.activeProfile}`))
-  info(dim(`switch with: nodus-context use <name>`))
+  info(dim(`switch with: context use <name>`))
 }
 
 export interface ProfileAddArgs {
@@ -106,7 +106,7 @@ export async function cmdProfileRemove(args: { name: string }): Promise<void> {
 export async function cmdUse(args: { name: string }): Promise<void> {
   const config = await loadConfig()
   if (!config.profiles[args.name]) {
-    fail(`no profile "${args.name}". list with: nodus-context profile list`)
+    fail(`no profile "${args.name}". list with: context profile list`)
   }
   config.activeProfile = args.name
   await saveConfig(config)

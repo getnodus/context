@@ -47,7 +47,7 @@ export async function runInit(opts: InitOptions): Promise<void> {
 }
 
 async function runFreshInstall(opts: InitOptions): Promise<void> {
-  info(bold("nodus-context setup"))
+  info(bold("context setup"))
   info(dim("Default local storage: ") + cyan(getDefaultLocalDir()))
   if (opts.dryRun) info(yellow("dry-run: no changes will be written"))
   info("")
@@ -81,7 +81,7 @@ async function runFreshInstall(opts: InitOptions): Promise<void> {
 
   const names = candidates.map((t) => t.name).join(", ")
   if (!opts.yes && !opts.dryRun) {
-    const ok = await confirm(`Add nodus-context MCP server to: ${names}?`, true)
+    const ok = await confirm(`Add context MCP server to: ${names}?`, true)
     if (!ok) {
       info("aborted")
       return
@@ -100,7 +100,7 @@ async function runFreshInstall(opts: InitOptions): Promise<void> {
 }
 
 async function runRepair(opts: InitOptions): Promise<void> {
-  info(bold("nodus-context repair"))
+  info(bold("context repair"))
   if (opts.dryRun) info(yellow("dry-run: no changes will be written"))
   info("")
 

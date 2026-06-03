@@ -27,7 +27,7 @@ export async function cmdSync(args: SyncArgs): Promise<void> {
   const source = await openBackend(from, config.profiles[from])
   const target = await openBackend(to, config.profiles[to])
 
-  info(bold(`nodus-context sync ${args.direction}`))
+  info(bold(`context sync ${args.direction}`))
   info(`  ${dim("from:")}  ${cyan(from)}  ${dim(describeBackend(source))}`)
   info(`  ${dim("to:")}    ${cyan(to)}  ${dim(describeBackend(target))}`)
   if (args.dryRun) info(yellow("dry-run: no changes will be written"))

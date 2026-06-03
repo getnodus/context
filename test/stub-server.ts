@@ -7,7 +7,7 @@ import { startServer } from "../src/server/index.js"
  * that HttpBackend speaks the protocol correctly.
  *
  * Internally delegates to the same handler the production
- * `nodus-context-server` bin uses, so the conformance suite exercises the
+ * `context-server` bin uses, so the conformance suite exercises the
  * real server code.
  */
 export async function startStubServer(

@@ -2,8 +2,11 @@ import { readFile, writeFile } from "node:fs/promises"
 import { getBackend } from "../context.js"
 import { fail, info, green, dim, yellow } from "../output.js"
 
+// `nodus-context-bundle` is the pre-rename format tag; still accepted on import.
+type BundleFormat = "context-bundle" | "nodus-context-bundle"
+
 interface Bundle {
-  format: "nodus-context-bundle"
+  format: BundleFormat
   version: 1
   exportedAt: string
   entries: Array<{
@@ -43,7 +46,7 @@ export async function cmdExport(args: { out?: string }): Promise<void> {
   }
 
   const bundle: Bundle = {
-    format: "nodus-context-bundle",
+    format: "context-bundle",
     version: 1,
     exportedAt: new Date().toISOString(),
     entries,
@@ -73,8 +76,8 @@ export async function cmdImport(args: { file: string; overwrite?: boolean }): Pr
     fail(`could not parse ${args.file} as JSON: ${(e as Error).message}`)
   }
 
-  if (bundle.format !== "nodus-context-bundle") {
-    fail(`not a nodus-context bundle (format=${bundle.format})`)
+  if (bundle.format !== "context-bundle" && bundle.format !== "nodus-context-bundle") {
+    fail(`not a context bundle (format=${bundle.format})`)
   }
   if (bundle.version !== 1) {
     fail(`unsupported bundle version ${bundle.version}`)
