@@ -2,6 +2,7 @@
 import { readFileSync } from "node:fs"
 import { fileURLToPath } from "node:url"
 import { dirname, join } from "node:path"
+import { homedir } from "node:os"
 import { McpServer, ResourceTemplate } from "@modelcontextprotocol/sdk/server/mcp.js"
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod"
@@ -19,18 +20,12 @@ import {
   VerifySpec,
 } from "../backends/index.js"
 import { runVerify } from "../backends/verify.js"
-import {
-  computeMemoryHealth,
-  entryHealthMarker,
-  filterAcked,
-  filterForBrief,
-  renderHealthBullets,
-  renderHealthHeadline,
-} from "../backends/health.js"
-import { loadAcks, recordAcks } from "../health/acks.js"
+import { recordAcks } from "../health/acks.js"
 import { getActiveProfile } from "../config/index.js"
 import { packageVersion } from "../cli/version.js"
-import { readUpdateInfo, refreshUpdateInfo, manualUpgradeCommand } from "../cli/update-check.js"
+import { refreshUpdateInfo } from "../cli/update-check.js"
+import { renderBrief } from "./brief.js"
+import { deriveWorkspaceHints, rootUriToPath } from "./workspace.js"
 
 const ID_FIELD = z
   .string()
@@ -583,11 +578,13 @@ export async function run() {
       title: "User context brief",
       description:
         "Always-relevant facts: rules the user has set, soft preferences, " +
-        "and identity. Load this first to know how the user wants to be helped.",
+        "and identity, plus any entries relevant to the current workspace. " +
+        "Load this first to know how the user wants to be helped.",
       mimeType: "text/markdown",
     },
     async (uri) => {
-      const brief = await renderBrief(backend, desc)
+      const hints = await gatherWorkspaceHints(server)
+      const brief = await renderBrief(backend, desc, { hints })
       return {
         contents: [{ uri: uri.href, mimeType: "text/markdown", text: brief }],
       }
@@ -659,113 +656,32 @@ export async function run() {
   await server.connect(transport)
 }
 
-const BRIEF_SECTION_CAP = 8
-
-async function renderBrief(
-  backend: ContextBackend,
-  desc: import("../backends/index.js").BackendDescription,
-): Promise<string> {
-  const [rules, preferences, identity, all, healthRaw, acks, update] = await Promise.all([
-    backend.list({ type: "rule" }),
-    backend.list({ type: "preference" }),
-    backend.list({ prefix: "user/" }),
-    backend.list(),
-    computeMemoryHealth(backend),
-    loadAcks(backend),
-    readUpdateInfo(),
-  ])
-  const health = filterForBrief(filterAcked(healthRaw, acks))
-
-  const caps: string[] = []
-  if (desc.capabilities.history) caps.push("history")
-  if (desc.capabilities.semanticSearch) caps.push("semantic search")
-  const capStr = caps.length > 0 ? ` · ${caps.join(", ")}` : ""
-
-  const lines: string[] = [
-    "# User context brief",
-    "",
-    `_Backend: **${desc.type}** — ${desc.label} · ${all.length} entries${capStr}_`,
-  ]
-
-  // Update notice — agents see this at session start. Phrase it as a fact
-  // for the agent to relay, not as an action the agent should take; the
-  // user is the one who runs `npm install -g`. Surfaced once per session;
-  // no ack mechanism because the cache itself bounds noise to ~daily.
-  if (update?.outdated) {
-    lines.push(
-      "",
-      `> **Heads-up for the user:** \`@getnodus/context\` is out of date on this machine ` +
-        `(installed ${update.current}, latest ${update.latest}). Tell the user once and ` +
-        `suggest they run \`context update\` (or \`${manualUpgradeCommand()}\` if they ` +
-        `don't have the CLI on PATH) when convenient. Don't refuse to use the tool — ` +
-        `it still works.`,
-    )
-  }
-
-  // Memory health surface — the only place this information is shown
-  // automatically. Agents see it before they touch the store.
-  const healthBullets = renderHealthBullets(health)
-  if (healthBullets.length > 0) {
-    const headline = renderHealthHeadline(health)
-    lines.push(
-      "",
-      `## Memory health — ${headline}`,
-      "",
-      ...healthBullets,
-      "",
-      "_Mention these to the user once, briefly, and offer to clean up. After mentioning, call " +
-        "`acknowledge_health` with the keys above so they don't reappear in the next brief._",
-    )
-  }
-  lines.push("")
-
-  const sections: Array<[string, ContextEntrySummary[]]> = [
-    ["Rules (must follow)", rules],
-    ["Preferences (respect when possible)", preferences],
-    ["Identity", identity.filter((e) => e.type !== "rule" && e.type !== "preference")],
-  ]
-
-  let any = false
-  for (const [heading, entriesRaw] of sections) {
-    // Order by recency, then cap so the brief stays token-friendly.
-    // Failed-verify entries are SHOWN here with a ⚠ marker (not hidden) —
-    // rules and preferences are load-bearing; a failed verify on a
-    // referenced URL doesn't mean the rule itself no longer applies.
-    // Memory health (above) flags the verify failure separately.
-    const entries = entriesRaw.sort((a, b) => b.updated.localeCompare(a.updated))
-    if (entries.length === 0) continue
-    any = true
-    lines.push(`## ${heading}`, "")
-    const shown = entries.slice(0, BRIEF_SECTION_CAP)
-    for (const e of shown) {
-      const marker = entryHealthMarker(e)
-      const markerPrefix = marker ? `${marker} ` : ""
-      const tags = e.tags.length > 0 ? `  _[${e.tags.join(", ")}]_` : ""
-      const author = e.author ? `  _by ${e.author}_` : ""
-      lines.push(`- ${markerPrefix}**${e.id}**${tags}${author}`)
-      if (e.preview) lines.push(`  ${e.preview}`)
+/**
+ * Best-effort discovery of the agent's current workspace, used to surface
+ * repo-relevant entries in the brief. Prefers MCP roots (the client's declared
+ * workspace folders); falls back to the server's cwd when the client exposes no
+ * roots. Always resolves — any failure yields no hints, so the brief degrades
+ * to its workspace-agnostic form. The `listRoots` round-trip is bounded by a
+ * short timeout so a slow or non-conforming client can't stall the brief.
+ */
+async function gatherWorkspaceHints(server: McpServer): Promise<string[]> {
+  const paths: string[] = []
+  try {
+    if (server.server.getClientCapabilities()?.roots) {
+      const { roots } = await server.server.listRoots(undefined, { timeout: 1000 })
+      for (const root of roots) {
+        const p = rootUriToPath(root.uri)
+        if (p) paths.push(p)
+      }
     }
-    if (entries.length > shown.length) {
-      lines.push(
-        `- _…and ${entries.length - shown.length} more — query with \`list_context\` if you need them_`,
-      )
-    }
-    lines.push("")
+  } catch {
+    // Client doesn't support roots, or the request timed out — fall through.
   }
-
-  if (!any && healthBullets.length === 0) {
-    lines.push(
-      "_No durable user context recorded yet. As you learn things about the user that should " +
-        "persist across sessions, call `write_context` with an appropriate `type`._",
-    )
-  } else {
-    lines.push(
-      "---",
-      "_Use `list_context`, `search_context`, or read the `nodus-context://entry/{id}` resources for full bodies._",
-    )
+  if (paths.length === 0) {
+    const cwd = process.cwd()
+    if (cwd && cwd !== homedir()) paths.push(cwd)
   }
-
-  return lines.join("\n")
+  return deriveWorkspaceHints(paths)
 }
 
 interface RelatedExisting {
