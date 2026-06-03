@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-import { basename } from "node:path"
 import { parseArgs } from "node:util"
 import { runInit } from "./commands/init.js"
 import { runUninstall } from "./commands/uninstall.js"
@@ -38,17 +37,9 @@ import { bold, cyan, dim, fail, info, yellow } from "./output.js"
 import { packageVersion } from "./version.js"
 import { readUpdateInfo, refreshUpdateInfo, upgradeHint } from "./update-check.js"
 
-/**
- * Display the command name as the user actually invoked it. Both `context`
- * (preferred) and `nodus-context` (legacy) symlink to this script — using
- * `argv[1]` keeps the in-help examples consistent with what they typed,
- * which matters for copy-paste.
- */
+/** The CLI is invoked as `context`; help examples use that name throughout. */
 function invokedAs(): string {
-  const argv1 = process.argv[1]
-  if (!argv1) return "context"
-  const name = basename(argv1)
-  return name === "nodus-context" ? "nodus-context" : "context"
+  return "context"
 }
 
 function usage(): string {

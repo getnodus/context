@@ -163,7 +163,7 @@ export async function renderBrief(
   } else {
     lines.push(
       "---",
-      "_Use `recall_context` for the normal path; use `list_context`, `search_context`, or `nodus-context://entry/{id}` when you need exact entry details._",
+      "_Use `recall_context` for the normal path; use `list_context`, `search_context`, or `context://entry/{id}` when you need exact entry details._",
     )
   }
 

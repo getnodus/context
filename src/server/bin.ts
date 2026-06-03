@@ -7,12 +7,12 @@ import { startAdvertising } from "./discovery.js"
 import { runServerInstall } from "./install.js"
 import { packageVersion } from "../cli/version.js"
 
-const HELP = `nodus-context-server — Nodus Context HTTP Protocol server
+const HELP = `context-server — Nodus Context HTTP Protocol server
 
 Usage:
-  nodus-context-server [options]            Run the server (foreground)
-  nodus-context-server install [options]    Interactive: write service, start, emit pairing string
-  nodus-context-server install --yes        Non-interactive (defaults: 0.0.0.0:7475, /srv/nodus-context, fresh token)
+  context-server [options]            Run the server (foreground)
+  context-server install [options]    Interactive: write service, start, emit pairing string
+  context-server install --yes        Non-interactive (defaults: 0.0.0.0:7475, /srv/context, fresh token)
 
 Options:
   --port <n>      Port to bind (default 7475, or $PORT)
@@ -31,9 +31,9 @@ When binding to anything other than 127.0.0.1, set a token. The handler
 returns 401 on every request if no Authorization: Bearer header matches.
 
 Examples:
-  nodus-context-server                                    # local only
-  nodus-context-server --host 0.0.0.0 --token "$T"        # Tailscale-accessible
-  nodus-context-server --root /srv/nodus --port 8080 --token "$T"
+  context-server                                    # local only
+  context-server --host 0.0.0.0 --token "$T"        # Tailscale-accessible
+  context-server --root /srv/nodus --port 8080 --token "$T"
 `
 
 async function main(): Promise<void> {
@@ -105,7 +105,7 @@ async function main(): Promise<void> {
   })
 
   const tokenNote = token ? "(token required)" : "(no token — trusted loopback only)"
-  process.stdout.write(`nodus-context-server v${packageVersion()} listening on ${running.url} ${tokenNote}\n`)
+  process.stdout.write(`context-server v${packageVersion()} listening on ${running.url} ${tokenNote}\n`)
   process.stdout.write(`backend: ${backend.describe().label}\n`)
 
   // Loopback-only servers can't be reached by other devices anyway, so
@@ -124,7 +124,7 @@ async function main(): Promise<void> {
         auth: token ? "bearer" : "none",
       },
     })
-    process.stdout.write(`mdns: advertising _nodus-context._tcp on the local network\n`)
+    process.stdout.write(`mdns: advertising _context._tcp on the local network\n`)
   }
 
   const shutdown = async (sig: NodeJS.Signals) => {
@@ -171,6 +171,6 @@ async function runInstallSubcommand(args: string[]): Promise<void> {
 }
 
 main().catch((e) => {
-  process.stderr.write(`nodus-context-server failed: ${e?.message ?? e}\n`)
+  process.stderr.write(`context-server failed: ${e?.message ?? e}\n`)
   process.exit(1)
 })

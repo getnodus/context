@@ -6,6 +6,13 @@ All notable changes to `@getnodus/context` are documented here. Format roughly f
 
 <!-- New entries land here. Group under topical subheadings (e.g. *Agent registry*, *Self-maintaining memory*) to match past releases. -->
 
+### Rename: `nodus-context` → `context` (breaking)
+
+- **The MCP server is now named `context`.** It registered under `nodus-context` before; agents that previously saw `mcp__nodus-context__*` tools now see `mcp__context__*`. `context install` / `context repair` migrate existing setups in place — they write the `context` entry and strip the leftover `nodus-context` one across all install kinds (JSON-merge, YAML-merge, and the `claude`/`codex` CLIs), so upgraders don't end up with two servers pointing at the same backend. Any allowlists or permission rules that reference the old `mcp__nodus-context__*` tool names need updating once.
+- **Resource URIs moved** from `nodus-context://brief` and `nodus-context://entry/{id}` to `context://brief` and `context://entry/{id}`.
+- **The `nodus-context`, `nodus-context-mcp`, and `nodus-context-server` binary aliases are removed.** Use `context`, `context-mcp`, and `context-server`. Scripts or CI invoking the old names must switch.
+- **Kept as-is:** the `@getnodus/context` package name, the `~/.nodus` storage/config directory, the `NODUS_*` environment variables, and the human-facing **Nodus Context** title and HTTP-protocol name. The export bundle is now tagged `context-bundle`; import still accepts the legacy `nodus-context-bundle` tag. The mDNS service type is now `context`, so a renamed server and a pre-rename client won't auto-discover each other during pairing — fall back to manual URL entry in that mixed case.
+
 ### Brief
 
 - **Workspace-aware brief.** The session-start brief now adds a **This workspace** section surfacing entries whose id segments or tags match the repo the agent is working in — so an agent starts already knowing about *this* project, not just always-on rules. The workspace is detected from the MCP client's [roots](https://modelcontextprotocol.io/specification/2025-06-18/client/roots) (leaf and parent directory names, so both a repo and a Conductor branch folder match), falling back to the server's working directory when the client exposes no roots. Matching is on whole id/tag segments (so `context` won't match `mycontextual`), entries already shown under Rules/Preferences/Identity aren't repeated, and the `listRoots` round-trip is bounded by a 1s timeout. Clients that expose no workspace see exactly the brief they saw before. The brief renderer moved to its own module (`src/mcp/brief.ts`) and is now unit-tested.

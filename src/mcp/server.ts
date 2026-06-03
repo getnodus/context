@@ -51,7 +51,7 @@ export async function run() {
 
   const server = new McpServer(
     {
-      name: "nodus-context",
+      name: "context",
       title: "Nodus Context",
       version: packageVersion(),
       icons: loadIcons(),
@@ -59,7 +59,7 @@ export async function run() {
     {
       instructions:
         `Persistent personal context layer for this user. Backend: ${desc.label}.\n\n` +
-        "AT SESSION START, read the resource `nodus-context://brief` for always-on facts " +
+        "AT SESSION START, read the resource `context://brief` for always-on facts " +
         "(rules, preferences, identity) — these shape how the user expects you to behave.\n\n" +
         "Default to the simple memory tools:\n" +
         "  - recall_context — search or list remembered context\n" +
@@ -642,8 +642,8 @@ export async function run() {
   // ---- Resources: auto-loaded by MCP clients at session start ----
 
   server.registerResource(
-    "nodus-context-brief",
-    "nodus-context://brief",
+    "context-brief",
+    "context://brief",
     {
       title: "User context brief",
       description:
@@ -662,13 +662,13 @@ export async function run() {
   )
 
   server.registerResource(
-    "nodus-context-entry",
-    new ResourceTemplate("nodus-context://entry/{id}", {
+    "context-entry",
+    new ResourceTemplate("context://entry/{id}", {
       list: async () => {
         const entries = await backend.list()
         return {
           resources: entries.map((e) => ({
-            uri: `nodus-context://entry/${e.id}`,
+            uri: `context://entry/${e.id}`,
             name: e.id,
             title: e.title,
             description: renderResourceDescription(e),
@@ -903,6 +903,6 @@ function errorResult(e: unknown) {
 }
 
 run().catch((e) => {
-  console.error("nodus-context-mcp failed:", e)
+  console.error("context-mcp failed:", e)
   process.exit(1)
 })

@@ -100,7 +100,7 @@ export interface ContextEntry {
   author?: string
   /** Agent that originally created this entry. Preserved across overwrites. */
   createdBy?: string
-  /** Declarative reality check; run by `confirm_context` / `nodus-context verify`. */
+  /** Declarative reality check; run by `confirm_context` / `context verify`. */
   verify?: VerifySpec
   /** ISO timestamp of the most recent verification attempt. */
   verifiedAt?: string

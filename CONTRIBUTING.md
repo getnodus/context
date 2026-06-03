@@ -46,12 +46,12 @@ Or link it into your `$PATH`:
 
 ```sh
 pnpm build
-npm link            # exposes nodus-context, nodus-context-mcp, nodus-context-server
+npm link            # exposes context, context-mcp, context-server
 ```
 
 ## Running the MCP server against a real client
 
-After `npm link`, point your MCP client at `nodus-context-mcp` (the binary from this checkout). Or use the non-interactive `setup` flow:
+After `npm link`, point your MCP client at `context-mcp` (the binary from this checkout). Or use the non-interactive `setup` flow:
 
 ```sh
 node dist/cli/index.js setup --backend=local --agents=detected --json

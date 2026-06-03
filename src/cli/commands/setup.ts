@@ -136,7 +136,7 @@ export async function cmdSetup(args: SetupArgs): Promise<void> {
         process.stdout.write(JSON.stringify(result, null, 2) + "\n")
         process.exit(1)
       }
-      info(bold("\nnodus-context setup"))
+      info(bold("\ncontext setup"))
       info(`  ${dim("profile  →")} ${cyan(profileName)} ${dim(`(${profile!.type})`)}`)
       info(`  ${dim("url      →")} ${cyan(serverUrl!)}${serverToken ? dim(" (auth)") : ""}`)
       info(`  ${dim("reachable→")} ${probe.reachable ? green("yes") : red("no")}`)
@@ -172,7 +172,7 @@ export async function cmdSetup(args: SetupArgs): Promise<void> {
         process.stdout.write(JSON.stringify(result, null, 2) + "\n")
         process.exit(1)
       }
-      info(bold("\nnodus-context setup"))
+      info(bold("\ncontext setup"))
       info(`  ${dim("profile  →")} ${cyan(profileName)} ${dim(`(${profile!.type})`)}`)
       info(`  ${dim("url      →")} ${cyan(serverUrl!)}${serverToken ? dim(" (auth)") : ""}`)
       info(red(`  not configured: ${result.error}`))
@@ -252,7 +252,7 @@ export async function cmdSetup(args: SetupArgs): Promise<void> {
     return
   }
 
-  info(bold("\nnodus-context setup"))
+  info(bold("\ncontext setup"))
   info(`  ${dim("profile  →")} ${cyan(profileName)} ${dim(`(${profile!.type})`)}`)
   if (serverUrl) info(`  ${dim("url      →")} ${cyan(serverUrl)}${serverToken ? dim(" (auth)") : ""}`)
   if (remoteProfile) info(`  ${dim("reachable→")} ${green("yes")}`)

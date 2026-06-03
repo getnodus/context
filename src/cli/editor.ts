@@ -5,7 +5,7 @@ import { join } from "node:path"
 
 export async function editInEditor(initial: string, filenameHint = "entry.md"): Promise<string> {
   const editor = process.env.VISUAL || process.env.EDITOR || "vi"
-  const dir = await mkdtemp(join(tmpdir(), "nodus-context-"))
+  const dir = await mkdtemp(join(tmpdir(), "context-"))
   const file = join(dir, filenameHint)
   await writeFile(file, initial, "utf8")
 

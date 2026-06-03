@@ -31,10 +31,7 @@
   "bin": {
     "context": "./dist/cli/index.js",
     "context-mcp": "./dist/mcp/server.js",
-    "context-server": "./dist/server/bin.js",
-    "nodus-context": "./dist/cli/index.js",
-    "nodus-context-mcp": "./dist/mcp/server.js",
-    "nodus-context-server": "./dist/server/bin.js"
+    "context-server": "./dist/server/bin.js"
   },
   "files": [
     "dist",

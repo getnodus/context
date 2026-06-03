@@ -171,7 +171,7 @@ function hintFor(t: AgentTarget, detected: boolean): string {
  * to the user only when the scan returns empty, to avoid noise.
  */
 async function pickServerUrl(): Promise<string> {
-  process.stderr.write(dim("  scanning local network for nodus-context servers… "))
+  process.stderr.write(dim("  scanning local network for context servers… "))
   let found: DiscoveredServer[] = []
   try {
     found = await discover({ timeoutMs: 3000 })
