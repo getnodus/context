@@ -1,9 +1,6 @@
 <div align="center">
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="assets/nodus-mark-dark.svg">
-  <img src="assets/nodus-mark-light.svg" alt="Nodus" width="120" height="120">
-</picture>
+<img src="assets/nodus-mark.svg" alt="Nodus" width="100" height="100">
 
 # @getnodus/context
 
