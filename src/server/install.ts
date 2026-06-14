@@ -175,7 +175,16 @@ export async function runServerInstall(opts: InstallOptions): Promise<InstallRes
   info("")
   info(bold("Pair clients with one of:"))
   info(`  ${green("$")} ${cyan(`context connect ${pairing}`)}`)
-  info(`  …or paste ${cyan(pairing)} into any client's setup wizard.`)
+  info(`  …or paste the pairing string into any client's setup wizard.`)
+  if (token) {
+    info("")
+    info(
+      yellow(
+        "  Pairing strings embed your bearer token. Treat them like passwords — " +
+          "don't paste into public chats, issues, or shared logs.",
+      ),
+    )
+  }
   info("")
   return result
 }

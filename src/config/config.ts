@@ -1,4 +1,4 @@
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises"
+import { chmod, mkdir, readFile, rename, writeFile } from "node:fs/promises"
 import { dirname, join } from "node:path"
 import { randomBytes } from "node:crypto"
 import { getNodusConfigDir, Profile } from "../backends/index.js"
@@ -50,12 +50,53 @@ export async function loadConfig(): Promise<NodusConfig> {
   return normalizeConfig(parsed)
 }
 
+/** Restrictive mode for config.json — bearer tokens live here. */
+export const CONFIG_FILE_MODE = 0o600
+
 export async function saveConfig(config: NodusConfig): Promise<void> {
   const path = configPath()
   await mkdir(dirname(path), { recursive: true })
   const tmp = `${path}.${randomBytes(6).toString("hex")}.tmp`
-  await writeFile(tmp, JSON.stringify(config, null, 2) + "\n", "utf8")
+  await writeFile(tmp, JSON.stringify(config, null, 2) + "\n", { encoding: "utf8", mode: CONFIG_FILE_MODE })
   await rename(tmp, path)
+  try {
+    await chmod(path, CONFIG_FILE_MODE)
+  } catch {
+    // chmod is best-effort (e.g. some Windows FS layouts); write mode still applies on create.
+  }
+}
+
+/**
+ * Return a copy of the config safe for JSON logging (CLI --json, agent transcripts).
+ * Bearer tokens are replaced with a redaction marker; `authed: true` is preserved on
+ * http profiles so callers still know auth is configured.
+ */
+export function redactConfig(config: NodusConfig): NodusConfig {
+  const profiles: Record<string, Profile> = {}
+  for (const [name, profile] of Object.entries(config.profiles)) {
+    profiles[name] = redactProfile(profile)
+  }
+  return {
+    activeProfile: config.activeProfile,
+    profiles,
+    ...(config.customAgents ? { customAgents: config.customAgents } : {}),
+  }
+}
+
+function redactProfile(profile: Profile): Profile {
+  switch (profile.type) {
+    case "http":
+      if (!profile.token) return profile
+      return { type: "http", url: profile.url, token: "<redacted>" }
+    case "mirror":
+      return {
+        type: "mirror",
+        primary: redactProfile(profile.primary),
+        secondary: redactProfile(profile.secondary) as Extract<Profile, { type: "http" }>,
+      }
+    default:
+      return profile
+  }
 }
 
 export async function getActiveProfile(): Promise<{ name: string; profile: Profile }> {

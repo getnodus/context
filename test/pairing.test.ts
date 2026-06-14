@@ -1,6 +1,6 @@
 import test from "node:test"
 import assert from "node:assert/strict"
-import { decodePairing, encodePairing, isPairingString } from "../src/server/pairing.js"
+import { decodePairing, encodePairing, isPairingString, redactPairingString } from "../src/server/pairing.js"
 
 test("pairing round-trips http with token", () => {
   const s = encodePairing({ url: "http://192.168.1.20:7475", token: "abc123" })
@@ -48,4 +48,10 @@ test("decodePairing rejects non-pairing input", () => {
 
 test("encodePairing rejects non-http URLs", () => {
   assert.throws(() => encodePairing({ url: "file:///x" }), /only support http/)
+})
+
+test("redactPairingString hides token", () => {
+  const s = encodePairing({ url: "http://192.168.1.20:7475", token: "abc123" })
+  assert.equal(redactPairingString(s), "nodus://redacted@192.168.1.20:7475")
+  assert.equal(redactPairingString("nodus://127.0.0.1:7475"), "nodus://127.0.0.1:7475")
 })

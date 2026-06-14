@@ -70,6 +70,20 @@ export function isPairingString(s: string): boolean {
   return t.startsWith("nodus://") || t.startsWith("nodus+https://")
 }
 
+/**
+ * Redact the token from a pairing string for safe logging. The host/port
+ * are preserved so operators can still see where to connect.
+ */
+export function redactPairingString(s: string): string {
+  try {
+    const decoded = decodePairing(s)
+    if (!decoded.token) return s
+    return encodePairing({ url: decoded.url, token: "redacted" })
+  } catch {
+    return s.replace(/^(nodus(?:\+https)?:\/\/)[^@]+@/, "$1redacted@")
+  }
+}
+
 function bracketIfV6(host: string): string {
   // URL.hostname strips brackets from IPv6; we re-add them so the result
   // is a parseable URL.
