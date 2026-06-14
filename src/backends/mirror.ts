@@ -78,8 +78,8 @@ export class MirrorBackend implements ContextBackend {
   }
 
   async close(): Promise<void> {
-    await this.#primary.close?.().catch(() => {})
-    await this.#secondary.close?.().catch(() => {})
+    await this.#primary.close?.().catch((e) => this.#onError("close-primary", e as Error))
+    await this.#secondary.close?.().catch((e) => this.#onError("close-secondary", e as Error))
   }
 
   async read(id: string): Promise<ContextEntry> {

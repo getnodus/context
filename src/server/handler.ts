@@ -205,7 +205,8 @@ export function createHandler(
                 },
               ],
             }
-          } catch {
+          } catch (e) {
+            process.stderr.write(`[context-server] inline verify failed for ${id}: ${e instanceof Error ? e.message : String(e)}\n`)
             extraVerify = { verifyStatus: "unknown", verifiedAt: new Date().toISOString() }
           }
         }
