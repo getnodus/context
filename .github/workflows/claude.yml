@@ -15,7 +15,7 @@ on:
 
 jobs:
   claude:
-    uses: getnodus/workflow/.github/workflows/claude.yml@main
+    uses: getnodus/workflow/.github/workflows/claude.yml@e690497f5d49c04166878aed55095f7f04a43e0c # main
     permissions:
       contents: read
       pull-requests: read
