@@ -11,6 +11,13 @@ export {
   type ProfileMirror,
 } from "./factory.js"
 export { MirrorBackend, type MirrorBackendOptions } from "./mirror.js"
+export {
+  toWriteInput,
+  sameEntryContent,
+  mergeEntries,
+  runInlineVerify,
+  type InlineVerifyOutcome,
+} from "./entry-utils.js"
 export { getDefaultLocalDir, getNodusConfigDir } from "./paths.js"
 export {
   type EmbeddingProvider,

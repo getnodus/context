@@ -2,8 +2,8 @@ import {
   ContextBackend,
   ContextEntry,
   ContextNotFoundError,
-  WriteInput,
 } from "./backends/types.js"
+import { toWriteInput, sameEntryContent } from "./backends/entry-utils.js"
 
 export interface SyncBackendOptions {
   overwrite?: boolean
@@ -50,7 +50,7 @@ export async function syncBackends(
     if (targetSummary) {
       try {
         const targetEntry = await target.read(summary.id)
-        if (sameContent(entry, targetEntry)) {
+        if (sameEntryContent(entry, targetEntry)) {
           skipped++
           options.onSkip?.(summary.id, "same-content")
           continue
@@ -93,27 +93,4 @@ export async function reconcileBackends(
   return { forward, backward }
 }
 
-export function toWriteInput(entry: ContextEntry): WriteInput {
-  return {
-    id: entry.id,
-    body: entry.body,
-    title: entry.title,
-    type: entry.type,
-    tags: entry.tags,
-    supersedes: entry.supersedes,
-    expires: entry.expires,
-    author: entry.author,
-    verify: entry.verify,
-    verifiedAt: entry.verifiedAt,
-    verifyStatus: entry.verifyStatus,
-    verifyMessage: entry.verifyMessage,
-    verifyAccepted: entry.verifyAccepted,
-    verifyAcceptedAt: entry.verifyAcceptedAt,
-    verifyAcceptedReason: entry.verifyAcceptedReason,
-    confirmations: entry.confirmations,
-  }
-}
-
-function sameContent(a: ContextEntry, b: ContextEntry): boolean {
-  return JSON.stringify(toWriteInput(a)) === JSON.stringify(toWriteInput(b))
-}
+export { toWriteInput } from "./backends/entry-utils.js"

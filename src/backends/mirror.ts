@@ -13,7 +13,7 @@ import {
   WriteInput,
 } from "./types.js"
 import { computeMemoryHealthDirect, type MemoryHealth, type HealthOptions } from "./health.js"
-import { toWriteInput } from "../sync.js"
+import { toWriteInput, sameEntryContent } from "./entry-utils.js"
 
 export interface MirrorBackendOptions {
   /** Backend used for reads (fast / local-first). Required. */
@@ -299,24 +299,7 @@ export class MirrorBackend implements ContextBackend {
     const entry = await this.#primary.revert(id, snapshotName, author)
     // Propagate the reverted state to secondary so it doesn't drift.
     try {
-      await this.#secondary.write({
-        id: entry.id,
-        body: entry.body,
-        title: entry.title,
-        type: entry.type,
-        tags: entry.tags,
-        supersedes: entry.supersedes,
-        expires: entry.expires,
-        author: entry.author,
-        verify: entry.verify,
-        verifiedAt: entry.verifiedAt,
-        verifyStatus: entry.verifyStatus,
-        verifyMessage: entry.verifyMessage,
-        verifyAccepted: entry.verifyAccepted,
-        verifyAcceptedAt: entry.verifyAcceptedAt,
-        verifyAcceptedReason: entry.verifyAcceptedReason,
-        confirmations: entry.confirmations,
-      })
+      await this.#secondary.write(toWriteInput(entry))
     } catch (e) {
       this.#onError(`revert ${id}`, e as Error)
     }
@@ -339,6 +322,4 @@ function isNewer(a: string | undefined, b: string | undefined): boolean {
   return a > b
 }
 
-function sameEntryContent(a: ContextEntry, b: ContextEntry): boolean {
-  return JSON.stringify(toWriteInput(a)) === JSON.stringify(toWriteInput(b))
-}
+

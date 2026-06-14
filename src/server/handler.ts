@@ -1,8 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http"
 import { timingSafeEqual } from "node:crypto"
-import type { ContextBackend, VerifySpec, VerifyStatus, Confirmation } from "../backends/index.js"
-import { BackendError, BodyTooLargeError, ContextNotFoundError, InvalidIdError, MAX_BODY_BYTES } from "../backends/index.js"
-import { runVerify } from "../backends/verify.js"
+import type { ContextBackend, VerifyStatus, Confirmation } from "../backends/index.js"
+import { BackendError, BodyTooLargeError, ContextNotFoundError, InvalidIdError, MAX_BODY_BYTES, runInlineVerify } from "../backends/index.js"
 import { computeMemoryHealth } from "../backends/health.js"
 import { packageVersion } from "../cli/version.js"
 import { loadServerAcks, recordServerAcks } from "./acks.js"
@@ -187,27 +186,19 @@ export function createHandler(
           confirmations?: Confirmation[]
         } = {}
         if (parsed.verify && !parsed.verifyStatus) {
-          try {
-            // Inline verify keeps the write fast: tighten env-configured
-            // timeout to a 3s ceiling so a slow remote doesn't block the PUT.
-            const result = await runVerify(parsed.verify as VerifySpec, { inlineBudgetMs: 3000 })
-            const at = new Date().toISOString()
-            extraVerify = {
-              verifyStatus: result.status,
-              verifiedAt: at,
-              ...(result.message !== undefined ? { verifyMessage: result.message } : {}),
-              confirmations: [
-                ...(parsed.confirmations ?? []),
-                {
-                  by: parsed.author ?? "http-server",
-                  at,
-                  method: "verify" as const,
-                },
-              ],
-            }
-          } catch (e) {
-            process.stderr.write(`[context-server] inline verify failed for ${id}: ${e instanceof Error ? e.message : String(e)}\n`)
-            extraVerify = { verifyStatus: "unknown", verifiedAt: new Date().toISOString() }
+          const outcome = await runInlineVerify(parsed.verify, {
+            onError: (e) => process.stderr.write(`[context-server] inline verify failed for ${id}: ${e instanceof Error ? e.message : String(e)}\n`),
+          })
+          extraVerify = {
+            ...outcome,
+            confirmations: [
+              ...(parsed.confirmations ?? []),
+              {
+                by: parsed.author ?? "http-server",
+                at: outcome.verifiedAt,
+                method: "verify" as const,
+              },
+            ],
           }
         }
 

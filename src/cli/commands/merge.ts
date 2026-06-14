@@ -1,4 +1,4 @@
-import { ContextNotFoundError } from "../../backends/index.js"
+import { ContextNotFoundError, mergeEntries } from "../../backends/index.js"
 import { getBackend } from "../context.js"
 import { readStdin, stdinIsTty } from "../stdin.js"
 import { bold, cyan, dim, fail, green, info } from "../output.js"
@@ -45,35 +45,12 @@ export async function cmdMerge(args: MergeArgs): Promise<void> {
 
   let body = args.body
   if (body === undefined && !stdinIsTty()) {
-    body = (await readStdin()).trim()
-    if (!body) body = undefined
-  }
-  if (body === undefined) {
-    body = `${intoEntry.body.trim()}\n\n---\n\n${fromEntry.body.trim()}`
+    body = (await readStdin()).trim() || undefined
   }
 
-  const mergedTags = Array.from(new Set([...(intoEntry.tags ?? []), ...(fromEntry.tags ?? [])]))
-  const supersedes = Array.from(new Set([...(intoEntry.supersedes ?? []), args.from]))
   const author = args.author ?? process.env.NODUS_CONTEXT_AGENT ?? "cli"
 
-  const saved = await backend.write({
-    id: args.into,
-    body,
-    title: intoEntry.title,
-    type: intoEntry.type,
-    tags: mergedTags,
-    supersedes,
-    expires: intoEntry.expires,
-    author,
-    verify: intoEntry.verify ?? fromEntry.verify,
-    verifyStatus: intoEntry.verifyStatus ?? fromEntry.verifyStatus,
-    verifiedAt: intoEntry.verifiedAt ?? fromEntry.verifiedAt,
-    ...(intoEntry.verifyMessage !== undefined
-      ? { verifyMessage: intoEntry.verifyMessage }
-      : fromEntry.verifyMessage !== undefined
-        ? { verifyMessage: fromEntry.verifyMessage }
-        : {}),
-  })
+  const saved = await backend.write(mergeEntries(fromEntry, intoEntry, { body, author }))
   await backend.delete(args.from)
 
   if (args.json) {
