@@ -32,7 +32,11 @@ export async function loadLocalAcks(): Promise<HealthAckMap> {
       if (typeof value === "string") out[key] = value
     }
     return out
-  } catch {
+  } catch (e: any) {
+    // Missing file is expected on first run; other errors are noteworthy.
+    if (e?.code !== "ENOENT" && !(e instanceof SyntaxError)) {
+      process.stderr.write(`[context] warning: could not load health acks: ${e?.message ?? e}\n`)
+    }
     return {}
   }
 }
@@ -49,7 +53,8 @@ export async function loadAcks(backend?: ContextBackend): Promise<HealthAckMap> 
   let remote: HealthAckMap = {}
   try {
     remote = await backend.listAcks()
-  } catch {
+  } catch (e) {
+    process.stderr.write(`[context] could not load remote acks, using local only: ${e instanceof Error ? e.message : String(e)}\n`)
     return local
   }
   const merged: HealthAckMap = { ...local }
@@ -87,8 +92,8 @@ export async function recordAcks(
   if (backend?.recordAcks) {
     try {
       await backend.recordAcks(keys)
-    } catch {
-      // ignore — remote will catch up on the next ack
+    } catch (e) {
+      process.stderr.write(`[context] remote ack sync failed (will retry next time): ${e instanceof Error ? e.message : String(e)}\n`)
     }
   }
   return { added: keys.length, at }

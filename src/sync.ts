@@ -1,6 +1,7 @@
 import {
   ContextBackend,
   ContextEntry,
+  ContextNotFoundError,
   WriteInput,
 } from "./backends/types.js"
 
@@ -54,8 +55,12 @@ export async function syncBackends(
           options.onSkip?.(summary.id, "same-content")
           continue
         }
-      } catch {
+      } catch (e) {
         // If target read fails after list saw the id, attempt the write below.
+        // Log non-"not found" errors since they may indicate a real problem.
+        if (!(e instanceof ContextNotFoundError)) {
+          process.stderr.write(`[context] sync: could not read target entry ${summary.id}: ${e instanceof Error ? e.message : String(e)}\n`)
+        }
       }
     }
 

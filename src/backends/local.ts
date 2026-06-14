@@ -130,8 +130,10 @@ export class LocalBackend implements ContextBackend {
       created = existing.data.created ?? now
       previous = parseEntry(input.id, existing)
       createdBy = previous.createdBy ?? createdBy
-    } catch {
-      // new file
+    } catch (e: any) {
+      if (e?.code !== "ENOENT") {
+        process.stderr.write(`[context] warning: could not read existing entry ${input.id}: ${e?.message ?? e}\n`)
+      }
     }
 
     if (previous) {
@@ -280,7 +282,11 @@ export class LocalBackend implements ContextBackend {
       let latest: ContextEntry
       try {
         latest = parseEntry(entry.id, await this.#readRaw(idToPath(this.rootDir, entry.id)))
-      } catch {
+      } catch (e: any) {
+        // Entry was deleted or became unreadable between verify and write-back.
+        if (e?.code !== "ENOENT") {
+          process.stderr.write(`[context] background-verify: could not re-read ${entry.id}: ${e?.message ?? e}\n`)
+        }
         return
       }
       await this.write({
@@ -305,8 +311,9 @@ export class LocalBackend implements ContextBackend {
           },
         ],
       })
-    } catch {
-      // Background work — don't propagate.
+    } catch (e) {
+      // Background work — don't propagate, but log for observability.
+      process.stderr.write(`[context] background-verify failed for ${entry.id}: ${e instanceof Error ? e.message : String(e)}\n`)
     }
   }
 
@@ -399,7 +406,8 @@ export class LocalBackend implements ContextBackend {
     let queryVec: number[]
     try {
       queryVec = await this.#embedder.embed(query)
-    } catch {
+    } catch (e) {
+      process.stderr.write(`[context] embedding query failed, falling back to lexical: ${e instanceof Error ? e.message : String(e)}\n`)
       return lexicalHits.slice(0, limit)
     }
 
@@ -448,7 +456,8 @@ export class LocalBackend implements ContextBackend {
       const vector = await this.#embedder.embed(text)
       await this.#embeddings.save(entry.id, this.#embedder.id, hash, vector)
       return vector
-    } catch {
+    } catch (e) {
+      process.stderr.write(`[context] embedding failed for ${entry.id}: ${e instanceof Error ? e.message : String(e)}\n`)
       return null
     }
   }
@@ -557,7 +566,10 @@ export class LocalBackend implements ContextBackend {
   async #scanFull(): Promise<ContextEntry[]> {
     try {
       await stat(this.rootDir)
-    } catch {
+    } catch (e: any) {
+      if (e?.code !== "ENOENT") {
+        process.stderr.write(`[context] cannot stat context dir ${this.rootDir}: ${e?.message ?? e}\n`)
+      }
       return []
     }
     const files = await walkMarkdown(this.rootDir)
@@ -567,8 +579,9 @@ export class LocalBackend implements ContextBackend {
         const id = pathToId(this.rootDir, filePath)
         const parsed = await this.#readRaw(filePath)
         out.push(parseEntry(id, parsed))
-      } catch {
-        // skip unparseable
+      } catch (e) {
+        // Skip unparseable entries but warn so corrupt files are noticed.
+        process.stderr.write(`[context] skipping unreadable entry at ${filePath}: ${e instanceof Error ? e.message : String(e)}\n`)
       }
     }
     return out

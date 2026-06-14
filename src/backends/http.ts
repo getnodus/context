@@ -160,8 +160,12 @@ export class HttpBackend implements ContextBackend {
         if (typeof v === "string") out[k] = v
       }
       return out
-    } catch {
-      // Server unreachable, doesn't implement /acks, etc. — degrade silently.
+    } catch (e) {
+      // Server unreachable or doesn't implement /acks — degrade gracefully
+      // but log so persistent failures are visible.
+      if (e instanceof BackendError) {
+        process.stderr.write(`[context] listAcks failed: ${e.message}\n`)
+      }
       return {}
     }
   }
@@ -177,7 +181,12 @@ export class HttpBackend implements ContextBackend {
         added: typeof body?.added === "number" ? body.added : keys.length,
         at: typeof body?.at === "string" ? body.at : at,
       }
-    } catch {
+    } catch (e) {
+      // Server unreachable or doesn't implement /acks — degrade gracefully
+      // but log so persistent failures are visible.
+      if (e instanceof BackendError) {
+        process.stderr.write(`[context] recordAcks failed: ${e.message}\n`)
+      }
       return { added: 0, at }
     }
   }

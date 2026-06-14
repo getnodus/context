@@ -744,8 +744,9 @@ async function gatherWorkspaceHints(server: McpServer): Promise<string[]> {
         if (p) paths.push(p)
       }
     }
-  } catch {
+  } catch (e) {
     // Client doesn't support roots, or the request timed out — fall through.
+    process.stderr.write(`[context] workspace hints unavailable: ${e instanceof Error ? e.message : String(e)}\n`)
   }
   if (paths.length === 0) {
     const cwd = process.cwd()
@@ -801,7 +802,8 @@ async function findRelatedExisting(
           relation: sameSubject ? ("same-subject" as const) : ("similar" as const),
         }
       })
-  } catch {
+  } catch (e) {
+    process.stderr.write(`[context] related-entry search failed: ${e instanceof Error ? e.message : String(e)}\n`)
     return []
   }
 }

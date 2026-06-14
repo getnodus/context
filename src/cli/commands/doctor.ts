@@ -87,8 +87,9 @@ export async function cmdDoctor(args: DoctorArgs = {}): Promise<void> {
       info(dim(`  full audit: context doctor --memory`))
     }
     info("")
-  } catch {
+  } catch (e) {
     // Memory diagnostics are nice-to-have; never fail the doctor over them.
+    process.stderr.write(`[context] memory health check failed: ${e instanceof Error ? e.message : String(e)}\n`)
   }
 
   info(bold("Agent integrations"))
