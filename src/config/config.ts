@@ -85,9 +85,14 @@ export function redactConfig(config: NodusConfig): NodusConfig {
 
 function redactProfile(profile: Profile): Profile {
   switch (profile.type) {
-    case "http":
-      if (!profile.token) return profile
-      return { type: "http", url: profile.url, token: "<redacted>" }
+    case "http": {
+      if (!profile.token && !profile.headers) return profile
+      return {
+        ...profile,
+        ...(profile.token ? { token: "<redacted>" } : {}),
+        ...(profile.headers ? { headers: redactHeaders(profile.headers) } : {}),
+      }
+    }
     case "mirror":
       return {
         type: "mirror",
@@ -97,6 +102,10 @@ function redactProfile(profile: Profile): Profile {
     default:
       return profile
   }
+}
+
+function redactHeaders(headers: Record<string, string>): Record<string, string> {
+  return Object.fromEntries(Object.keys(headers).map((name) => [name, "<redacted>"]))
 }
 
 export async function getActiveProfile(): Promise<{ name: string; profile: Profile }> {

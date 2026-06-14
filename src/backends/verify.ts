@@ -27,10 +27,14 @@ export interface VerifyOptions {
    */
   inlineBudgetMs?: number
   /** Override DNS lookup (testing). */
-  lookup?: (hostname: string) => Promise<{ address: string }>
+  lookup?: (hostname: string) => Promise<LookupAddress | LookupAddress[]>
 }
 
 const MAX_REDIRECTS = 5
+
+interface LookupAddress {
+  address: string
+}
 
 /**
  * Resolve the verify timeout: explicit option > env > default.
@@ -86,13 +90,18 @@ async function verifyUrl(
   timeoutMs: number,
   lookup?: VerifyOptions["lookup"],
 ): Promise<VerifyResult> {
+  const deadline = Date.now() + timeoutMs
   const preflight = await assertPublicUrl(url, lookup)
   if (preflight) return preflight
 
   let current = url
   for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+    const remainingMs = deadline - Date.now()
+    if (remainingMs <= 0) {
+      return { status: "unknown", message: `timed out after ${timeoutMs}ms` }
+    }
     const ctrl = new AbortController()
-    const timer = setTimeout(() => ctrl.abort(), timeoutMs)
+    const timer = setTimeout(() => ctrl.abort(), remainingMs)
     try {
       const res = await fetchImpl(current, {
         method: "GET",
@@ -145,9 +154,10 @@ async function assertPublicUrl(
   const hostname = urlHostname(url)
   if (!isIpLiteral(hostname)) {
     try {
-      const resolve = lookup ?? ((h: string) => dns.lookup(h, { verbatim: true }))
-      const { address } = await resolve(hostname)
-      if (isPrivateIp(address)) {
+      const resolve = lookup ?? ((h: string) => dns.lookup(h, { all: true, verbatim: true }))
+      const result = await resolve(hostname)
+      const addresses = Array.isArray(result) ? result : [result]
+      if (addresses.some(({ address }) => isPrivateIp(address))) {
         return {
           status: "failed",
           message: "url verify target resolves to a private/internal address",
@@ -200,6 +210,9 @@ export function isPrivateIp(host: string): boolean {
   const hostname = host.replace(/^\[|\]$/g, "").toLowerCase()
   if (hostname === "localhost") return true
 
+  const mappedIpv4 = ipv4MappedAddress(hostname)
+  if (mappedIpv4) return isPrivateIp(mappedIpv4)
+
   const ipv4Match = hostname.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/)
   if (ipv4Match) {
     const parts = ipv4Match.slice(1).map(Number)
@@ -222,6 +235,18 @@ export function isPrivateIp(host: string): boolean {
   }
 
   return false
+}
+
+function ipv4MappedAddress(hostname: string): string | null {
+  const dotted = hostname.match(/^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/)
+  if (dotted) return dotted[1]
+
+  const hex = hostname.match(/^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/)
+  if (!hex) return null
+
+  const high = parseInt(hex[1], 16)
+  const low = parseInt(hex[2], 16)
+  return `${high >> 8}.${high & 255}.${low >> 8}.${low & 255}`
 }
 
 async function verifyRepo(

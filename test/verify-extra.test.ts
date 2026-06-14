@@ -63,6 +63,57 @@ test("runVerify: inlineBudgetMs caps timeout", async () => {
   assert.equal(result.status, "ok")
 })
 
+test("runVerify: inlineBudgetMs is shared across redirects", async () => {
+  const realNow = Date.now
+  let now = realNow()
+  Date.now = () => now
+
+  try {
+    let calls = 0
+    const fakeFetch = (async (_input: any, init: RequestInit) => {
+      calls += 1
+      if (calls === 1) {
+        now += 90
+        return {
+          status: 302,
+          headers: { get: (h: string) => (h.toLowerCase() === "location" ? "https://example.com/next" : null) },
+          body: { cancel: async () => {} },
+        } as unknown as Response
+      }
+
+      return await new Promise<Response>((resolve, reject) => {
+        const timer = setTimeout(() => resolve({ ok: true, status: 200 } as unknown as Response), 50)
+        init.signal?.addEventListener(
+          "abort",
+          () => {
+            clearTimeout(timer)
+            const error = new Error("aborted")
+            error.name = "AbortError"
+            reject(error)
+          },
+          { once: true },
+        )
+      })
+    }) as typeof fetch
+
+    const result = await runVerify(
+      { kind: "url", target: "https://example.com/start" },
+      {
+        fetch: fakeFetch,
+        lookup: async () => ({ address: "93.184.216.34" }),
+        timeoutMs: 100,
+        inlineBudgetMs: 100,
+      },
+    )
+
+    assert.equal(result.status, "unknown")
+    assert.match(result.message ?? "", /timed out after 100ms/)
+    assert.equal(calls, 2)
+  } finally {
+    Date.now = realNow
+  }
+})
+
 // --- runVerify: unknown verify kind ---
 
 test("runVerify: unknown kind returns unknown status", async () => {

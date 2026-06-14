@@ -11,6 +11,7 @@ test("isPrivateUrl blocks loopback and RFC1918 literals", () => {
   assert.equal(isPrivateUrl("http://[::1]/"), true)
   assert.equal(isPrivateUrl("http://[fe80::1]/"), true)
   assert.equal(isPrivateUrl("http://[fc00::1]/"), true)
+  assert.equal(isPrivateUrl("http://[::ffff:127.0.0.1]/"), true)
 })
 
 test("isPrivateUrl allows public hosts", () => {
@@ -21,6 +22,12 @@ test("isPrivateUrl allows public hosts", () => {
 test("isPrivateIp covers CGNAT range", () => {
   assert.equal(isPrivateIp("100.64.0.1"), true)
   assert.equal(isPrivateIp("8.8.8.8"), false)
+})
+
+test("isPrivateIp covers IPv4-mapped IPv6 addresses", () => {
+  assert.equal(isPrivateIp("::ffff:127.0.0.1"), true)
+  assert.equal(isPrivateIp("::ffff:7f00:1"), true)
+  assert.equal(isPrivateIp("::ffff:8.8.8.8"), false)
 })
 
 test("verify url: rejects private literal without fetching", async () => {
@@ -75,6 +82,25 @@ test("verify url: rejects hostname resolving to private IP", async () => {
     {
       fetch: fakeFetch,
       lookup: async () => ({ address: "127.0.0.1" }),
+    },
+  )
+  assert.equal(result.status, "failed")
+  assert.match(result.message ?? "", /resolves to a private/)
+  assert.equal(called, false)
+})
+
+test("verify url: rejects hostname when any DNS answer is private", async () => {
+  let called = false
+  const fakeFetch = (async () => {
+    called = true
+    return { ok: true, status: 200 } as Response
+  }) as typeof fetch
+
+  const result = await runVerify(
+    { kind: "url", target: "https://mixed.example/start" },
+    {
+      fetch: fakeFetch,
+      lookup: async () => [{ address: "93.184.216.34" }, { address: "127.0.0.1" }],
     },
   )
   assert.equal(result.status, "failed")

@@ -109,6 +109,30 @@ test("redactConfig replaces bearer tokens in json output", () => {
   }
 })
 
+test("redactConfig redacts http headers in json output", () => {
+  const config = {
+    activeProfile: "server",
+    profiles: {
+      server: {
+        type: "http" as const,
+        url: "https://example.com",
+        headers: {
+          authorization: "Basic secret",
+          "x-api-key": "key",
+        },
+      },
+    },
+  }
+  const redacted = redactConfig(config)
+  assert.equal(redacted.profiles.server.type, "http")
+  if (redacted.profiles.server.type === "http") {
+    assert.deepEqual(redacted.profiles.server.headers, {
+      authorization: "<redacted>",
+      "x-api-key": "<redacted>",
+    })
+  }
+})
+
 test("configPath honors NODUS_CONFIG_DIR", async () => {
   await withConfigDir(async () => {
     const p = configPath()
