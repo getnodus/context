@@ -32,6 +32,7 @@ import {
 import { lexicalSearch } from "./lexical.js"
 import { computeConfidence } from "./confidence.js"
 import { runVerify, VerifyResult } from "./verify.js"
+import { toWriteInput } from "./entry-utils.js"
 import {
   computeMemoryHealthDirect,
   type HealthOptions,
@@ -289,26 +290,16 @@ export class LocalBackend implements ContextBackend {
         }
         return
       }
+      const nowIso = new Date().toISOString()
       await this.write({
-        id: latest.id,
-        body: latest.body,
-        title: latest.title,
-        type: latest.type,
-        tags: latest.tags,
-        supersedes: latest.supersedes,
-        expires: latest.expires,
+        ...toWriteInput(latest),
         author: latest.author ?? "background-verify",
-        verify: latest.verify,
         verifyStatus: result.status,
-        verifiedAt: new Date().toISOString(),
+        verifiedAt: nowIso,
         ...(result.message !== undefined ? { verifyMessage: result.message } : {}),
         confirmations: [
           ...(latest.confirmations ?? []),
-          {
-            by: "background-verify",
-            at: new Date().toISOString(),
-            method: "verify",
-          },
+          { by: "background-verify", at: nowIso, method: "verify" },
         ],
       })
     } catch (e) {

@@ -1,4 +1,4 @@
-import { Confirmation, ContextEntry } from "../../backends/index.js"
+import { Confirmation, ContextEntry, toWriteInput } from "../../backends/index.js"
 import { runVerify } from "../../backends/verify.js"
 import { getBackend } from "../context.js"
 import { bold, cyan, dim, green, info, red, yellow } from "../output.js"
@@ -78,15 +78,8 @@ export async function cmdVerify(args: VerifyArgs): Promise<void> {
     const confirmation: Confirmation = { by: "cli", at: nowIso, method: "verify" }
     const confirmations = [...(entry.confirmations ?? []), confirmation]
     await backend.write({
-      id: entry.id,
-      body: entry.body,
-      title: entry.title,
-      type: entry.type,
-      tags: entry.tags,
-      supersedes: entry.supersedes,
-      expires: entry.expires,
+      ...toWriteInput(entry),
       author: "cli",
-      verify: entry.verify,
       verifyStatus: result.status,
       verifiedAt: nowIso,
       ...(result.message !== undefined ? { verifyMessage: result.message } : {}),

@@ -18,6 +18,9 @@ import {
   ContextEntrySummary,
   Confirmation,
   VerifySpec,
+  toWriteInput,
+  mergeEntries,
+  runInlineVerify,
 } from "../backends/index.js"
 import { runVerify } from "../backends/verify.js"
 import { recordAcks } from "../health/acks.js"
@@ -320,19 +323,7 @@ export async function run() {
           verifiedAt?: string
         } = {}
         if (verify) {
-          try {
-            // Inline verify keeps writes fast: tighten env-configured timeout
-            // to a 3s ceiling. Background/CLI/`confirm_context` use the full
-            // env-configured budget instead.
-            const result = await runVerify(verify, { inlineBudgetMs: 3000 })
-            verifyOutcome = {
-              verifyStatus: result.status,
-              verifiedAt: new Date().toISOString(),
-              ...(result.message !== undefined ? { verifyMessage: result.message } : {}),
-            }
-          } catch {
-            verifyOutcome = { verifyStatus: "unknown", verifiedAt: new Date().toISOString() }
-          }
+          verifyOutcome = await runInlineVerify(verify)
         }
         const author = resolveAuthor()
         const newConfirmation: Confirmation | null = verify
@@ -417,15 +408,8 @@ export async function run() {
           }
           const nextConfirmations = [...(entry.confirmations ?? []), confirmation]
           await backend.write({
-            id,
-            body: entry.body,
-            title: entry.title,
-            type: entry.type,
-            tags: entry.tags,
-            supersedes: entry.supersedes,
-            expires: entry.expires,
+            ...toWriteInput(entry),
             author,
-            verify: entry.verify,
             ...(entry.verify
               ? {
                   verifyStatus: status === "skipped" ? entry.verifyStatus : status,
@@ -511,18 +495,8 @@ export async function run() {
         const author = resolveAuthor()
         const nowIso = new Date().toISOString()
         const saved = await backend.write({
-          id,
-          body: entry.body,
-          title: entry.title,
-          type: entry.type,
-          tags: entry.tags,
-          supersedes: entry.supersedes,
-          expires: entry.expires,
+          ...toWriteInput(entry),
           author,
-          verify: entry.verify,
-          verifyStatus: entry.verifyStatus,
-          verifiedAt: entry.verifiedAt,
-          ...(entry.verifyMessage !== undefined ? { verifyMessage: entry.verifyMessage } : {}),
           verifyAccepted: true,
           verifyAcceptedAt: nowIso,
           ...(reason ? { verifyAcceptedReason: reason } : {}),
@@ -570,33 +544,8 @@ export async function run() {
           return errorResult(new Error("merge_context: from and into must differ"))
         }
         const [fromEntry, intoEntry] = await Promise.all([backend.read(from), backend.read(into)])
-        const mergedBody =
-          body !== undefined
-            ? body
-            : `${intoEntry.body.trim()}\n\n---\n\n${fromEntry.body.trim()}`
-        const mergedTags = Array.from(new Set([...(intoEntry.tags ?? []), ...(fromEntry.tags ?? [])]))
-        const supersedes = Array.from(
-          new Set([...(intoEntry.supersedes ?? []), from]),
-        )
         const author = resolveAuthor()
-        const saved = await backend.write({
-          id: into,
-          body: mergedBody,
-          title: intoEntry.title,
-          type: intoEntry.type,
-          tags: mergedTags,
-          supersedes,
-          expires: intoEntry.expires,
-          author,
-          verify: intoEntry.verify ?? fromEntry.verify,
-          verifyStatus: intoEntry.verifyStatus ?? fromEntry.verifyStatus,
-          verifiedAt: intoEntry.verifiedAt ?? fromEntry.verifiedAt,
-          ...(intoEntry.verifyMessage !== undefined
-            ? { verifyMessage: intoEntry.verifyMessage }
-            : fromEntry.verifyMessage !== undefined
-              ? { verifyMessage: fromEntry.verifyMessage }
-              : {}),
-        })
+        const saved = await backend.write(mergeEntries(fromEntry, intoEntry, { body, author }))
         await backend.delete(from)
         return jsonResult({ merged: true, into: saved.id, removed: from, entry: saved })
       } catch (e) {

@@ -1,4 +1,4 @@
-import { ContextNotFoundError } from "../../backends/index.js"
+import { ContextNotFoundError, toWriteInput } from "../../backends/index.js"
 import { getBackend } from "../context.js"
 import { bold, cyan, dim, fail, green, info } from "../output.js"
 
@@ -36,18 +36,8 @@ export async function cmdAccept(args: AcceptArgs): Promise<void> {
   const author = args.author ?? process.env.NODUS_CONTEXT_AGENT ?? "cli"
   const nowIso = new Date().toISOString()
   const saved = await backend.write({
-    id: entry.id,
-    body: entry.body,
-    title: entry.title,
-    type: entry.type,
-    tags: entry.tags,
-    supersedes: entry.supersedes,
-    expires: entry.expires,
+    ...toWriteInput(entry),
     author,
-    verify: entry.verify,
-    verifyStatus: entry.verifyStatus,
-    verifiedAt: entry.verifiedAt,
-    ...(entry.verifyMessage !== undefined ? { verifyMessage: entry.verifyMessage } : {}),
     verifyAccepted: !args.unaccept,
     ...(!args.unaccept ? { verifyAcceptedAt: nowIso } : {}),
     ...(args.reason && !args.unaccept ? { verifyAcceptedReason: args.reason } : {}),
