@@ -36,11 +36,11 @@ export async function startServer(
   const host = options.host ?? "127.0.0.1"
   const handler = createHandler(backend, options)
   const server = createServer((req, res) => {
-    handler(req, res).catch((e) => {
+    handler(req, res).catch(() => {
       try {
         res.statusCode = 500
         res.setHeader("content-type", "application/json")
-        res.end(JSON.stringify({ error: e?.message ?? String(e) }))
+        res.end(JSON.stringify({ error: "internal server error" }))
       } catch {}
     })
   })

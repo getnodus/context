@@ -83,6 +83,9 @@ async function verifyUrl(
   if (!/^https?:\/\//i.test(url)) {
     return { status: "failed", message: `url verify target must be http(s): ${url}` }
   }
+  if (isPrivateUrl(url)) {
+    return { status: "failed", message: "url verify target must not point to a private/internal address" }
+  }
   const ctrl = new AbortController()
   const timer = setTimeout(() => ctrl.abort(), timeoutMs)
   try {
@@ -98,6 +101,39 @@ async function verifyUrl(
   } finally {
     clearTimeout(timer)
   }
+}
+
+/**
+ * Block requests to private/internal network addresses to prevent SSRF.
+ * Rejects loopback, link-local, RFC-1918 private ranges, and cloud
+ * metadata endpoints.
+ */
+function isPrivateUrl(url: string): boolean {
+  let parsed: URL
+  try {
+    parsed = new URL(url)
+  } catch {
+    return true
+  }
+  const hostname = parsed.hostname.replace(/^\[|\]$/g, "")
+  // Loopback
+  if (hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1") return true
+  // Cloud metadata endpoint
+  if (hostname === "169.254.169.254") return true
+  // IPv4 private ranges
+  const ipv4Match = hostname.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/)
+  if (ipv4Match) {
+    const [, a, b] = ipv4Match.map(Number)
+    if (a === 10) return true                              // 10.0.0.0/8
+    if (a === 172 && b >= 16 && b <= 31) return true       // 172.16.0.0/12
+    if (a === 192 && b === 168) return true                // 192.168.0.0/16
+    if (a === 127) return true                             // 127.0.0.0/8
+    if (a === 169 && b === 254) return true                // 169.254.0.0/16 link-local
+    if (a === 0) return true                               // 0.0.0.0/8
+  }
+  // .local, .internal hostnames
+  if (hostname.endsWith(".local") || hostname.endsWith(".internal")) return true
+  return false
 }
 
 async function verifyRepo(

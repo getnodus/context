@@ -1,7 +1,7 @@
 import type { IncomingMessage, ServerResponse } from "node:http"
 import { timingSafeEqual } from "node:crypto"
 import type { ContextBackend, VerifySpec, VerifyStatus, Confirmation } from "../backends/index.js"
-import { BackendError, ContextNotFoundError, InvalidIdError, MAX_BODY_BYTES } from "../backends/index.js"
+import { BackendError, BodyTooLargeError, ContextNotFoundError, InvalidIdError, MAX_BODY_BYTES } from "../backends/index.js"
 import { runVerify } from "../backends/verify.js"
 import { computeMemoryHealth } from "../backends/health.js"
 import { packageVersion } from "../cli/version.js"
@@ -332,7 +332,8 @@ export function createHandler(
       status = statusForError(e)
       res.statusCode = status
       res.setHeader("content-type", "application/json")
-      res.end(JSON.stringify({ error: e?.message ?? String(e) }))
+      const safeMessage = isSafeError(e) ? (e?.message ?? String(e)) : "internal server error"
+      res.end(JSON.stringify({ error: safeMessage }))
     } finally {
       options.onRequest?.({
         method,
@@ -428,4 +429,15 @@ function statusForError(e: unknown): number {
   if (e instanceof ContextNotFoundError) return 404
   if (e instanceof BackendError) return 502
   return 500
+}
+
+/** Returns true when the error carries a message safe to expose to clients. */
+function isSafeError(e: unknown): boolean {
+  return (
+    e instanceof ClientInputError ||
+    e instanceof InvalidIdError ||
+    e instanceof ContextNotFoundError ||
+    e instanceof BodyTooLargeError ||
+    e instanceof BackendError
+  )
 }
