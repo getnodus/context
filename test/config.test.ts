@@ -1,6 +1,6 @@
 import test from "node:test"
 import assert from "node:assert/strict"
-import { mkdtemp, rm } from "node:fs/promises"
+import { mkdtemp, rm, stat } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import {
@@ -10,6 +10,8 @@ import {
   normalizeConfig,
   configPath,
   getActiveProfile,
+  redactConfig,
+  CONFIG_FILE_MODE,
 } from "../src/config/index.js"
 
 async function withConfigDir<T>(fn: () => Promise<T>): Promise<T> {
@@ -75,6 +77,36 @@ test("normalizeConfig adds default when no profiles", () => {
   const config = normalizeConfig({})
   assert.equal(config.activeProfile, "default")
   assert.deepEqual(config.profiles.default, { type: "local" })
+})
+
+test("saveConfig writes config.json with mode 600", async () => {
+  await withConfigDir(async () => {
+    await saveConfig(defaultConfig())
+    const st = await stat(configPath())
+    assert.equal(st.mode & 0o777, CONFIG_FILE_MODE)
+  })
+})
+
+test("redactConfig replaces bearer tokens in json output", () => {
+  const config = {
+    activeProfile: "cloud",
+    profiles: {
+      default: { type: "local" as const },
+      cloud: {
+        type: "mirror" as const,
+        primary: { type: "local" as const },
+        secondary: { type: "http" as const, url: "http://10.0.0.1:7475", token: "secret-abc" },
+      },
+    },
+  }
+  const redacted = redactConfig(config)
+  assert.equal(redacted.profiles.cloud.type, "mirror")
+  if (redacted.profiles.cloud.type === "mirror") {
+    assert.equal(redacted.profiles.cloud.secondary.type, "http")
+    if (redacted.profiles.cloud.secondary.type === "http") {
+      assert.equal(redacted.profiles.cloud.secondary.token, "<redacted>")
+    }
+  }
 })
 
 test("configPath honors NODUS_CONFIG_DIR", async () => {

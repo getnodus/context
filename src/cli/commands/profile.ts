@@ -1,4 +1,4 @@
-import { loadConfig, saveConfig, NodusConfig } from "../../config/index.js"
+import { loadConfig, saveConfig, NodusConfig, redactConfig } from "../../config/index.js"
 import { bold, cyan, dim, fail, green, info, yellow } from "../output.js"
 import { Profile } from "../../backends/index.js"
 import { confirm } from "../prompt.js"
@@ -6,7 +6,7 @@ import { confirm } from "../prompt.js"
 export async function cmdProfileList(args: { json?: boolean }): Promise<void> {
   const config = await loadConfig()
   if (args.json) {
-    process.stdout.write(JSON.stringify(config, null, 2) + "\n")
+    process.stdout.write(JSON.stringify(redactConfig(config), null, 2) + "\n")
     return
   }
   info(bold("profiles"))
@@ -116,7 +116,7 @@ export async function cmdUse(args: { name: string }): Promise<void> {
 export async function cmdConfigShow(args: { json?: boolean }): Promise<void> {
   const config = await loadConfig()
   if (args.json) {
-    process.stdout.write(JSON.stringify(config, null, 2) + "\n")
+    process.stdout.write(JSON.stringify(redactConfig(config), null, 2) + "\n")
     return
   }
   const { configPath } = await import("../../config/index.js")

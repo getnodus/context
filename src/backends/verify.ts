@@ -1,4 +1,5 @@
 import { stat } from "node:fs/promises"
+import dns from "node:dns/promises"
 import { VerifySpec, VerifyStatus } from "./types.js"
 
 export interface VerifyResult {
@@ -25,7 +26,11 @@ export interface VerifyOptions {
    * Defaults to ignoring the cap.
    */
   inlineBudgetMs?: number
+  /** Override DNS lookup (testing). */
+  lookup?: (hostname: string) => Promise<{ address: string }>
 }
+
+const MAX_REDIRECTS = 5
 
 /**
  * Resolve the verify timeout: explicit option > env > default.
@@ -65,7 +70,7 @@ export async function runVerify(
 
   switch (spec.kind) {
     case "url":
-      return verifyUrl(spec.target, fetchImpl, timeoutMs)
+      return verifyUrl(spec.target, fetchImpl, timeoutMs, options.lookup)
     case "repo":
       return verifyRepo(spec.target, fetchImpl, timeoutMs)
     case "path":
@@ -79,36 +84,106 @@ async function verifyUrl(
   url: string,
   fetchImpl: typeof fetch,
   timeoutMs: number,
+  lookup?: VerifyOptions["lookup"],
 ): Promise<VerifyResult> {
+  const preflight = await assertPublicUrl(url, lookup)
+  if (preflight) return preflight
+
+  let current = url
+  for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+    const ctrl = new AbortController()
+    const timer = setTimeout(() => ctrl.abort(), timeoutMs)
+    try {
+      const res = await fetchImpl(current, {
+        method: "GET",
+        signal: ctrl.signal,
+        redirect: "manual",
+      })
+
+      if (res.status >= 300 && res.status < 400) {
+        const location = res.headers.get("location")
+        await res.body?.cancel?.()
+        if (!location) {
+          return { status: "failed", message: `redirect ${res.status} missing Location header` }
+        }
+        current = new URL(location, current).href
+        const redirectCheck = await assertPublicUrl(current, lookup)
+        if (redirectCheck) return redirectCheck
+        continue
+      }
+
+      if (res.status >= 200 && res.status < 300) return { status: "ok" }
+      if (res.status >= 500) return { status: "unknown", message: `server returned ${res.status}` }
+      return { status: "failed", message: `HTTP ${res.status}` }
+    } catch (e: any) {
+      if (e?.name === "AbortError") {
+        return { status: "unknown", message: `timed out after ${timeoutMs}ms` }
+      }
+      return { status: "unknown", message: e?.message ?? String(e) }
+    } finally {
+      clearTimeout(timer)
+    }
+  }
+
+  return { status: "failed", message: `too many redirects (max ${MAX_REDIRECTS})` }
+}
+
+/**
+ * Returns a VerifyResult when the URL must be blocked, or null when safe to fetch.
+ */
+async function assertPublicUrl(
+  url: string,
+  lookup?: VerifyOptions["lookup"],
+): Promise<VerifyResult | null> {
   if (!/^https?:\/\//i.test(url)) {
     return { status: "failed", message: `url verify target must be http(s): ${url}` }
   }
   if (isPrivateUrl(url)) {
     return { status: "failed", message: "url verify target must not point to a private/internal address" }
   }
-  const ctrl = new AbortController()
-  const timer = setTimeout(() => ctrl.abort(), timeoutMs)
-  try {
-    const res = await fetchImpl(url, { method: "GET", signal: ctrl.signal, redirect: "follow" })
-    if (res.status >= 200 && res.status < 300) return { status: "ok" }
-    if (res.status >= 500) return { status: "unknown", message: `server returned ${res.status}` }
-    return { status: "failed", message: `HTTP ${res.status}` }
-  } catch (e: any) {
-    if (e?.name === "AbortError") {
-      return { status: "unknown", message: `timed out after ${timeoutMs}ms` }
+
+  const hostname = urlHostname(url)
+  if (!isIpLiteral(hostname)) {
+    try {
+      const resolve = lookup ?? ((h: string) => dns.lookup(h, { verbatim: true }))
+      const { address } = await resolve(hostname)
+      if (isPrivateIp(address)) {
+        return {
+          status: "failed",
+          message: "url verify target resolves to a private/internal address",
+        }
+      }
+    } catch (e: any) {
+      return {
+        status: "unknown",
+        message: `url verify target DNS lookup failed: ${e?.message ?? String(e)}`,
+      }
     }
-    return { status: "unknown", message: e?.message ?? String(e) }
-  } finally {
-    clearTimeout(timer)
   }
+
+  return null
+}
+
+function urlHostname(url: string): string {
+  try {
+    return new URL(url).hostname.replace(/^\[|\]$/g, "")
+  } catch {
+    return ""
+  }
+}
+
+function isIpLiteral(hostname: string): boolean {
+  if (!hostname) return false
+  if (hostname.includes(":")) return true
+  return /^\d{1,3}(\.\d{1,3}){3}$/.test(hostname)
 }
 
 /**
  * Block requests to private/internal network addresses to prevent SSRF.
- * Rejects loopback, link-local, RFC-1918 private ranges, and cloud
- * metadata endpoints.
+ * Rejects loopback, link-local, RFC-1918 private ranges, CGNAT, and cloud
+ * metadata endpoints. Hostname literals and resolved IPs share the same rules.
  */
-function isPrivateUrl(url: string): boolean {
+export function isPrivateUrl(url: string): boolean {
   let parsed: URL
   try {
     parsed = new URL(url)
@@ -116,23 +191,36 @@ function isPrivateUrl(url: string): boolean {
     return true
   }
   const hostname = parsed.hostname.replace(/^\[|\]$/g, "")
-  // Loopback
-  if (hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1") return true
-  // Cloud metadata endpoint
-  if (hostname === "169.254.169.254") return true
-  // IPv4 private ranges
+  if (hostname.endsWith(".local") || hostname.endsWith(".internal")) return true
+  return isPrivateIp(hostname)
+}
+
+/** True when `host` is a loopback, RFC-1918, link-local, CGNAT, or ULA address. */
+export function isPrivateIp(host: string): boolean {
+  const hostname = host.replace(/^\[|\]$/g, "").toLowerCase()
+  if (hostname === "localhost") return true
+
   const ipv4Match = hostname.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/)
   if (ipv4Match) {
-    const [, a, b] = ipv4Match.map(Number)
-    if (a === 10) return true                              // 10.0.0.0/8
-    if (a === 172 && b >= 16 && b <= 31) return true       // 172.16.0.0/12
-    if (a === 192 && b === 168) return true                // 192.168.0.0/16
-    if (a === 127) return true                             // 127.0.0.0/8
-    if (a === 169 && b === 254) return true                // 169.254.0.0/16 link-local
-    if (a === 0) return true                               // 0.0.0.0/8
+    const parts = ipv4Match.slice(1).map(Number)
+    if (parts.some((n) => n > 255)) return true
+    const [a, b] = parts
+    if (a === 10) return true // 10.0.0.0/8
+    if (a === 172 && b >= 16 && b <= 31) return true // 172.16.0.0/12
+    if (a === 192 && b === 168) return true // 192.168.0.0/16
+    if (a === 127) return true // 127.0.0.0/8
+    if (a === 169 && b === 254) return true // 169.254.0.0/16 link-local + metadata
+    if (a === 0) return true // 0.0.0.0/8
+    if (a === 100 && b >= 64 && b <= 127) return true // 100.64.0.0/10 CGNAT
+    return false
   }
-  // .local, .internal hostnames
-  if (hostname.endsWith(".local") || hostname.endsWith(".internal")) return true
+
+  if (hostname.includes(":")) {
+    if (hostname === "::1") return true
+    if (hostname.startsWith("fe80:")) return true // link-local
+    if (hostname.startsWith("fc") || hostname.startsWith("fd")) return true // ULA fc00::/7
+  }
+
   return false
 }
 
