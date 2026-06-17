@@ -13,7 +13,7 @@ on:
 
 jobs:
   call:
-    uses: getnodus/workflow/.github/workflows/pr-autofix.yml@e4bc4747b352fdc3a0099c44cffdb972d105e785 # main
+    uses: getnodus/workflow/.github/workflows/pr-autofix.yml@f750d696aca7d5687b60dd58ab5d8365621e5bff # main
     permissions:
       contents: write
       pull-requests: write
