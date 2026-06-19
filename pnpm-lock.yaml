@@ -26,7 +26,7 @@ importers:
     devDependencies:
       '@types/node':
         specifier: ^25.9.1
-        version: 25.9.3
+        version: 25.9.4
       tsx:
         specifier: ^4.22.4
         version: 4.22.4
@@ -211,8 +211,8 @@ packages:
       '@cfworker/json-schema':
         optional: true
 
-  '@types/node@25.9.3':
-    resolution: {integrity: sha512-603BddQMv3pUcr4U2dhujk83N2tTDVr/34wII2B6bJy6g+8WD6yUb11jszNs0gdi4PesVWl7ABt8nYMVpnLUcg==}
+  '@types/node@25.9.4':
+    resolution: {integrity: sha512-dszCsrKb5U7ZsVZBWiHFklTloVl0mSEnWH/iZXfZUlI4rzCUnsvGmgqfuVRHL54ugE7/wRuxEIXRa2iMZ+BG6g==}
 
   accepts@2.0.0:
     resolution: {integrity: sha512-5cvg6CtKwfgdmVqY1WIiXKc3Q1bkRqGLi+2W/6ao+6Y7gu/RCwRuAhGEzh5B4KlszSuTLgZYuqFqo5bImjNKng==}
@@ -757,7 +757,7 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  '@types/node@25.9.3':
+  '@types/node@25.9.4':
     dependencies:
       undici-types: 7.24.6
 
